@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+
+{% block page_title %}Post em Massa{% endblock %}
+{% block page_subtitle %}<p class="header-subtitle">Agende varios posts de uma vez com IA gerando os copys</p>{% endblock %}
+
+{% block content %}
+<div class="form-row" style="grid-template-columns: 1fr 1fr; align-items: start; gap: 24px;">
+  <div>
+    <div class="card mb-3">
+      <h4 class="section-title" style="font-size: 0.95rem;"><span class="section-icon">&#9881;</span> Configuracao</h4>
+      <div class="form-group">
+        <label class="form-label">Perfil</label>
+        <select class="form-select" id="bulkProfile" required>
+          <option value="" disabled selected>Selecionar perfil...</option>
+          {% for p in profiles %}
+          <option value="{{ p.id }}">{{ p.name }}{% if p.instagram_username %} (@{{ p.instagram_username }}){% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Tipo de Post</label>
+        <select class="form-select" id="bulkPostType">
+          <option value="photo">Foto</option>
+          <option value="reel">Reel</option>
+          <option value="carousel">Carrossel</option>
+          <option value="story">Story</option>
+        </select>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div class="form-group"><label class="form-label">Data Inicio</label><input type="date" class="form-input" id="bulkStartDate" required></div>
+        <div class="form-group"><label class="form-label">Horario</label><input type="time" class="form-input" id="bulkHour" value="10:00" required></div>
+      </div>
+      <div class="form-group"><label class="form-label">Intervalo entre posts (dias)</label><input type="number" class="form-input" id="bulkInterval" value="3" min="1" max="30" required></div>
+      <div class="form-group"><label class="form-label">Tom da IA</label>
+        <select class="form-select" id="bulkTone">
+          <option value="descontraido">Descontraido</option>
+          <option value="profissional">Profissional</option>
+          <option value="engajamento">Engajamento</option>
+          <option value="informativo">Informativo</option>
+        </select>
+      </div>
+      <div class="form-group"><label class="form-label">Proporcao</label>
+        <select class="form-select" id="bulkRatio">
+          <option value="original">Original</option>
+          <option value="1:1">1:1 (Quadrado)</option>
+          <option value="4:5">4:5 (Retrato)</option>
+          <option value="9:16">9:16 (Stories/Reels)</option>
+          <option value="16:9">16:9 (Paisagem)</option>
+        </select>
+      </div>
+    </div>
+    <div class="card mb-3">
+      <h4 class="section-title" style="font-size: 0.95rem;"><span class="section-icon">&#128444;</span> Midias</h4>
+      <div class="upload-zone" id="bulkUploadZone">
+        <span class="upload-icon">&#9729;</span>
+        <div class="upload-text">Arraste seus arquivos aqui ou <span class="upload-browse">clique para selecionar</span></div>
+        <div class="upload-hint">Selecione todas as midias na ordem desejada</div>
+        <input type="file" id="bulkMediaInput" accept="image/*,video/*" multiple>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-secondary" onclick="bulkGenerateCaptions()" id="btnGenerateCaptions" disabled>&#10024; Gerar Copys com IA</button>
+      <button class="btn btn-primary" onclick="bulkScheduleAll()" id="btnScheduleAll" disabled>Agendar Todos</button>
+    </div>
+  </div>
+  <div>
+    <div class="card">
+      <h4 class="section-title" style="font-size: 0.95rem;"><span class="section-icon">&#128203;</span> Posts (<span id="bulkCount">0</span>)</h4>
+      <div id="bulkPostsList" style="max-height:600px;overflow-y:auto;"><div style="padding:24px;text-align:center;color:var(--text-muted,#888);font-size:0.85rem;">Adicione midias para ver os posts aqui</div></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+var bulkFiles = [];
+var bulkCaptions = [];
+
+document.addEventListener("DOMContentLoaded", function() {
+  var zone = document.getElementById("bulkUploadZone");
+  var input = document.getElementById("bulkMediaInput");
+  zone.addEventListener("dragover", function(e) { e.preventDefault(); zone.classList.add("drag-over"); });
+  zone.addEventListener("dragleave", function() { zone.classList.remove("drag-over"); });
+  zone.addEventListener("drop", function(e) { e.preventDefault(); zone.classList.remove("drag-over"); addBulkFiles(e.dataTransfer.files); });
+  input.addEventListener("change", function() { addBulkFiles(input.files); });
+  var today = new Date().toISOString().split("T")[0];
+  document.getElementById("bulkStartDate").min = today;
+  document.getElementById("bulkStartDate").value = today;
+});
+
+function addBulkFiles(fileList) {
+  for (var i = 0; i < fileList.length; i++) { bulkFiles.push(fileList[i]); bulkCaptions.push(""); }
+  renderBulkList();
+  document.getElementById("btnGenerateCaptions").disabled = bulkFiles.length === 0;
+  document.getElementById("btnScheduleAll").disabled = bulkFiles.length === 0;
+}
+
+function renderBulkList() {
+  var container = document.getElementById("bulkPostsList");
+  document.getElementById("bulkCount").textContent = bulkFiles.length;
+  if (bulkFiles.length === 0) { container.innerHTML = "<div style='padding:24px;text-align:center;color:#888;'>Adicione midias</div>"; return; }
+  var startDate = document.getElementById("bulkStartDate").value || new Date().toISOString().split("T")[0];
+  var interval = parseInt(document.getElementById("bulkInterval").value) || 3;
+  var hour = document.getElementById("bulkHour").value || "10:00";
+  var html = "";
+  for (var i = 0; i < bulkFiles.length; i++) {
+    var file = bulkFiles[i];
+    var postDate = new Date(startDate + "T00:00:00");
+    postDate.setDate(postDate.getDate() + (i * interval));
+    var dateStr = postDate.toLocaleDateString("pt-BR") + " " + hour;
+    var isVideo = file.type.startsWith("video/");
+    html += "<div style='padding:12px;border-bottom:1px solid var(--border-color,#333);display:flex;gap:12px;align-items:start;'>";
+    html += "<div style='flex:0 0 60px;height:60px;border-radius:8px;overflow:hidden;background:var(--bg-glass,#222);display:flex;align-items:center;justify-content:center;font-size:1.5rem;'>";
+    if (!isVideo) { html += "<img src='" + URL.createObjectURL(file) + "' style='width:100%;height:100%;object-fit:cover;'>"; }
+    else { html += "&#127909;"; }
+    html += "</div><div style='flex:1;min-width:0;'>";
+    html += "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;'>";
+    html += "<strong style='font-size:0.8rem;'>" + (i+1) + ". " + dateStr + "</strong>";
+    html += "<div style='display:flex;gap:4px;'>";
+    if (i > 0) html += "<button class='btn btn-secondary btn-sm' onclick='moveBulkItem(" + i + ",-1)'>&#8593;</button>";
+    if (i < bulkFiles.length - 1) html += "<button class='btn btn-secondary btn-sm' onclick='moveBulkItem(" + i + ",1)'>&#8595;</button>";
+    html += "<button class='btn btn-danger btn-sm' onclick='removeBulkItem(" + i + ")'>&#10005;</button>";
+    html += "</div></div>";
+    html += "<textarea class='form-textarea' style='font-size:0.75rem;min-height:50px;resize:vertical;' placeholder='Copy sera gerado pela IA...' onchange='bulkCaptions[" + i + "]=this.value' id='bulkCaption" + i + "'>" + (bulkCaptions[i] || "") + "</textarea>";
+    html += "</div></div>";
+  }
+  container.innerHTML = html;
+}
+
+function moveBulkItem(index, direction) {
+  var n = index + direction;
+  if (n < 0 || n >= bulkFiles.length) return;
+  var t = bulkFiles[index]; bulkFiles[index] = bulkFiles[n]; bulkFiles[n] = t;
+  var c = bulkCaptions[index]; bulkCaptions[index] = bulkCaptions[n]; bulkCaptions[n] = c;
+  renderBulkList();
+}
+
+function removeBulkItem(index) {
+  bulkFiles.splice(index, 1); bulkCaptions.splice(index, 1);
+  renderBulkList();
+  document.getElementById("btnGenerateCaptions").disabled = bulkFiles.length === 0;
+  document.getElementById("btnScheduleAll").disabled = bulkFiles.length === 0;
+}
+
+async function bulkGenerateCaptions() {
+  if (bulkFiles.length === 0) return;
+  var btn = document.getElementById("btnGenerateCaptions");
+  btn.disabled = true; btn.textContent = "Gerando...";
+  var tone = document.getElementById("bulkTone").value;
+  for (var i = 0; i < bulkFiles.length; i++) {
+    try {
+      var fd = new FormData();
+      fd.append("media", bulkFiles[i]);
+      fd.append("tone", tone);
+      var resp = await fetch("/api/ai/caption", { method: "POST", body: fd });
+      var data = await resp.json();
+      if (data.success && data.caption) {
+        bulkCaptions[i] = data.caption;
+        var ta = document.getElementById("bulkCaption" + i);
+        if (ta) ta.value = data.caption;
+      }
+    } catch(e) { console.error(e); }
+  }
+  btn.disabled = false; btn.textContent = "Gerar Copys com IA";
+  showToast("Copys gerados para " + bulkFiles.length + " posts!", "success");
+}
+
+async function bulkScheduleAll() {
+  var profileId = document.getElementById("bulkProfile").value;
+  if (!profileId) { showToast("Selecione um perfil.", "warning"); return; }
+  for (var i = 0; i < bulkFiles.length; i++) {
+    var ta = document.getElementById("bulkCaption" + i);
+    if (ta) bulkCaptions[i] = ta.value;
+  }
+  var btn = document.getElementById("btnScheduleAll");
+  btn.disabled = true; btn.textContent = "Agendando...";
+  var fd = new FormData();
+  fd.append("profile_id", profileId);
+  fd.append("start_date", document.getElementById("bulkStartDate").value);
+  fd.append("interval_days", document.getElementById("bulkInterval").value);
+  fd.append("hour", document.getElementById("bulkHour").value);
+  fd.append("tone", document.getElementById("bulkTone").value);
+  fd.append("post_type", document.getElementById("bulkPostType").value);
+  fd.append("aspect_ratio", document.getElementById("bulkRatio").value);
+  fd.append("generate_captions", "false");
+  fd.append("captions_json", JSON.stringify(bulkCaptions));
+  for (var i = 0; i < bulkFiles.length; i++) { fd.append("media", bulkFiles[i]); }
+  try {
+    var resp = await fetch("/api/posts/bulk", { method: "POST", body: fd });
+    var data = await resp.json();
+    if (data.success) { showToast(data.message, "success"); setTimeout(function() { window.location.href = "/posts"; }, 1500); }
+    else { showToast(data.error || "Erro ao agendar.", "error"); }
+  } catch(e) { showToast("Erro de conexao.", "error"); }
+  btn.disabled = false; btn.textContent = "Agendar Todos";
+}
+
+document.getElementById("bulkStartDate").addEventListener("change", renderBulkList);
+document.getElementById("bulkInterval").addEventListener("change", renderBulkList);
+document.getElementById("bulkHour").addEventListener("change", renderBulkList);
+</script>
+{% endblock %}

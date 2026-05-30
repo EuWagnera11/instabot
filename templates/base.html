@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="InstaBot — Ferramenta de auto-postagem para Instagram">
+  <title>InstaBot — Instagram Auto-Poster</title>
+
+  <!-- Google Fonts: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+
+  {% block head %}{% endblock %}
+</head>
+<body>
+
+  <!-- Mobile Nav Toggle -->
+  <button class="mobile-toggle" onclick="toggleSidebar()" aria-label="Menu">☰</button>
+
+  <!-- Sidebar Overlay (mobile) -->
+  <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+
+  <!-- Sidebar Navigation -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <h1>
+        <span class="brand-emoji">📸</span> InstaBot
+      </h1>
+      <div class="brand-subtitle">Auto-Poster</div>
+    </div>
+
+    <nav class="sidebar-nav">
+      <a href="/" class="nav-item {% if active_page == 'dashboard' %}active{% endif %}">
+        <span class="nav-icon">🏠</span>
+        <span class="nav-label">Dashboard</span>
+      </a>
+      <a href="/posts" class="nav-item {% if active_page == 'posts' %}active{% endif %}">
+        <span class="nav-icon">📋</span>
+        <span class="nav-label">Posts</span>
+      </a>
+      <a href="/schedule" class="nav-item {% if active_page == 'schedule' %}active{% endif %}">
+        <span class="nav-icon">➕</span>
+        <span class="nav-label">Agendar</span>
+      </a>
+      <a href="/bulk" class="nav-item {% if active_page == 'bulk' %}active{% endif %}">
+        <span class="nav-icon">📦</span>
+        <span class="nav-label">Em Massa</span>
+      </a>
+      <a href="/settings" class="nav-item {% if active_page == 'settings' %}active{% endif %}">
+        <span class="nav-icon">⚙️</span>
+        <span class="nav-label">Configurações</span>
+      </a>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="connection-status" id="connectionStatus">
+        <span class="status-dot offline" id="statusDot"></span>
+        <span id="statusText">Instagram: Verificando...</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main Content -->
+  <main class="main-content">
+    <!-- Page Header -->
+    <header class="page-header">
+      <h2>{% block page_title %}Dashboard{% endblock %}</h2>
+      {% block page_subtitle %}{% endblock %}
+    </header>
+
+    <!-- Page Content -->
+    <div class="page-content">
+      {% block content %}{% endblock %}
+    </div>
+  </main>
+
+  <!-- Toast Notifications Container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- Confirm Modal -->
+  <div class="modal-overlay" id="confirmModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="confirmTitle">Confirmar Ação</h3>
+        <button class="btn-icon btn-secondary" onclick="closeModal('confirmModal')">✕</button>
+      </div>
+      <div class="modal-body">
+        <p id="confirmMessage">Tem certeza que deseja continuar?</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('confirmModal')">Cancelar</button>
+        <button class="btn btn-danger" id="confirmAction">Confirmar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- App JavaScript -->
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

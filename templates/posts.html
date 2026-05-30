@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+
+{% block page_title %}Posts Agendados{% endblock %}
+{% block page_subtitle %}<p class="header-subtitle">Gerencie todas as suas publicações</p>{% endblock %}
+
+{% block content %}
+<!-- Filter Tabs -->
+<div class="flex-between mb-3" style="flex-wrap: wrap; gap: 12px;">
+  <div class="filter-tabs" id="filterTabs">
+    <button class="filter-tab active" data-filter="all" onclick="filterPosts('all', this)">
+      Todos
+    </button>
+    <button class="filter-tab" data-filter="pending" onclick="filterPosts('pending', this)">
+      ⏳ Agendados
+    </button>
+    <button class="filter-tab" data-filter="published" onclick="filterPosts('published', this)">
+      ✅ Publicados
+    </button>
+    <button class="filter-tab" data-filter="failed" onclick="filterPosts('failed', this)">
+      ❌ Falhas
+    </button>
+  </div>
+
+  <a href="/schedule" class="btn btn-primary btn-sm">
+    ➕ Novo Post
+  </a>
+</div>
+
+<!-- Posts Grid -->
+{% if posts and posts|length > 0 %}
+<div class="posts-grid stagger" id="postsGrid">
+  {% for post in posts %}
+  <div class="post-card" data-status="{{ post.status }}" data-id="{{ post.id }}">
+    <!-- Media Thumbnail -->
+    <div class="post-card-media">
+      {% if post.media_path %}
+      <img src="{{ url_for('static', filename='uploads/' + post.media_path) }}" alt="Post media" loading="lazy">
+      {% else %}
+      <div class="flex-center" style="height: 100%; color: var(--text-muted); font-size: 3rem; background: var(--bg-glass);">
+        {% if post.post_type == 'reel' %}🎬
+        {% elif post.post_type == 'carrossel' %}🖼️
+        {% elif post.post_type == 'story' %}📱
+        {% else %}📷{% endif %}
+      </div>
+      {% endif %}
+
+      <!-- Type & Status overlay -->
+      <div class="media-overlay">
+        {% if post.post_type == 'foto' %}
+          <span class="badge badge-type foto">📷 Foto</span>
+        {% elif post.post_type == 'reel' %}
+          <span class="badge badge-type reel">🎬 Reel</span>
+        {% elif post.post_type == 'carrossel' %}
+          <span class="badge badge-type carrossel">🖼️ Carrossel</span>
+        {% elif post.post_type == 'story' %}
+          <span class="badge badge-type story">📱 Story</span>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Card Body -->
+    <div class="post-card-body">
+      <!-- Caption -->
+      <p class="post-card-caption">
+        {{ post.caption or 'Sem legenda' }}
+      </p>
+
+      <!-- Meta -->
+      <div class="post-card-meta">
+        <div class="post-card-profile">
+          👤 {{ post.profile_name or 'Perfil' }}
+        </div>
+        <span>{{ post.scheduled_time or '—' }}</span>
+      </div>
+
+      <!-- Status Badge -->
+      <div class="flex-between">
+        {% if post.status == 'pending' %}
+          <span class="badge badge-pending"><span class="badge-dot"></span> Agendado</span>
+        {% elif post.status == 'publishing' %}
+          <span class="badge badge-publishing"><span class="badge-dot"></span> Publicando</span>
+        {% elif post.status == 'published' %}
+          <span class="badge badge-published"><span class="badge-dot"></span> Publicado</span>
+        {% elif post.status == 'failed' %}
+          <span class="badge badge-failed"><span class="badge-dot"></span> Falhou</span>
+        {% endif %}
+
+        <!-- Actions -->
+        <div class="post-card-actions">
+          <button class="btn btn-secondary btn-icon btn-sm" onclick="viewPost('{{ post.id }}')" title="Ver detalhes">
+            👁️
+          </button>
+          {% if post.status == 'pending' %}
+          <button class="btn btn-success btn-icon btn-sm" onclick="publishNow('{{ post.id }}')" title="Publicar agora">
+            ▶
+          </button>
+          <button class="btn btn-danger btn-icon btn-sm" onclick="confirmDeletePost('{{ post.id }}')" title="Cancelar post">
+            🗑️
+          </button>
+          {% elif post.status == 'failed' %}
+          <button class="btn btn-danger btn-icon btn-sm" onclick="confirmDeletePost('{{ post.id }}')" title="Remover">
+            🗑️
+          </button>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<!-- Empty State -->
+<div class="card">
+  <div class="empty-state">
+    <span class="empty-icon">📭</span>
+    <div class="empty-title">Nenhum post encontrado</div>
+    <p class="empty-text">
+      Você ainda não tem posts agendados. Comece criando seu primeiro post!
+    </p>
+    <a href="/schedule" class="btn btn-primary">
+      ➕ Agendar Primeiro Post
+    </a>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // Initialize posts page
+  document.addEventListener('DOMContentLoaded', () => {
+    initPostsPage();
+  });
+</script>
+{% endblock %}

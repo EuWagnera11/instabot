@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+
+{% block page_title %}Dashboard{% endblock %}
+{% block page_subtitle %}<p class="header-subtitle">Visão geral das suas publicações</p>{% endblock %}
+
+{% block content %}
+<!-- Stats Cards -->
+<div class="stats-grid stagger">
+  <!-- Total Posts -->
+  <div class="stat-card stat-total">
+    <div class="stat-bg-glow"></div>
+    <span class="stat-icon">📊</span>
+    <div class="stat-value">{{ stats.total or 0 }}</div>
+    <div class="stat-label">Total de Posts</div>
+  </div>
+
+  <!-- Published -->
+  <div class="stat-card stat-published">
+    <div class="stat-bg-glow"></div>
+    <span class="stat-icon">✅</span>
+    <div class="stat-value">{{ stats.published or 0 }}</div>
+    <div class="stat-label">Publicados</div>
+  </div>
+
+  <!-- Pending -->
+  <div class="stat-card stat-pending">
+    <div class="stat-bg-glow"></div>
+    <span class="stat-icon">⏳</span>
+    <div class="stat-value">{{ stats.pending or 0 }}</div>
+    <div class="stat-label">Agendados</div>
+  </div>
+
+  <!-- Failed -->
+  <div class="stat-card stat-failed">
+    <div class="stat-bg-glow"></div>
+    <span class="stat-icon">❌</span>
+    <div class="stat-value">{{ stats.failed or 0 }}</div>
+    <div class="stat-label">Falhas</div>
+  </div>
+</div>
+
+<!-- Upcoming Posts -->
+<section class="mb-4">
+  <h3 class="section-title">
+    <span class="section-icon">🗓️</span> Próximos Posts
+  </h3>
+
+  {% if upcoming_posts and upcoming_posts|length > 0 %}
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Mídia</th>
+          <th>Legenda</th>
+          <th>Tipo</th>
+          <th>Agendado para</th>
+          <th>Status</th>
+          <th>Ações</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for post in upcoming_posts[:5] %}
+        <tr>
+          <td>
+            <div class="thumbnail">
+              {% if post.media_path %}
+              <img src="{{ url_for('static', filename='uploads/' + post.media_path) }}" alt="Prévia" loading="lazy">
+              {% else %}
+              <div class="flex-center" style="height:100%; color: var(--text-muted); font-size: 1.2rem;">📷</div>
+              {% endif %}
+            </div>
+          </td>
+          <td>
+            <span class="post-card-caption" style="display:inline; -webkit-line-clamp:1;">
+              {{ post.caption[:60] }}{% if post.caption|length > 60 %}…{% endif %}
+            </span>
+          </td>
+          <td>
+            {% if post.post_type == 'foto' %}
+              <span class="badge badge-type foto">📷 Foto</span>
+            {% elif post.post_type == 'reel' %}
+              <span class="badge badge-type reel">🎬 Reel</span>
+            {% elif post.post_type == 'carrossel' %}
+              <span class="badge badge-type carrossel">🖼️ Carrossel</span>
+            {% elif post.post_type == 'story' %}
+              <span class="badge badge-type story">📱 Story</span>
+            {% else %}
+              <span class="badge badge-type">{{ post.post_type }}</span>
+            {% endif %}
+          </td>
+          <td>
+            <span style="color: var(--text-secondary); font-size: 0.85rem;">
+              {{ post.scheduled_time }}
+            </span>
+          </td>
+          <td>
+            {% if post.status == 'pending' %}
+              <span class="badge badge-pending"><span class="badge-dot"></span> Agendado</span>
+            {% elif post.status == 'publishing' %}
+              <span class="badge badge-publishing"><span class="badge-dot"></span> Publicando</span>
+            {% elif post.status == 'published' %}
+              <span class="badge badge-published"><span class="badge-dot"></span> Publicado</span>
+            {% elif post.status == 'failed' %}
+              <span class="badge badge-failed"><span class="badge-dot"></span> Falhou</span>
+            {% endif %}
+          </td>
+          <td>
+            <div class="flex gap-1">
+              {% if post.status == 'pending' %}
+              <button class="btn btn-success btn-sm" onclick="publishNow('{{ post.id }}')" title="Publicar agora">
+                ▶
+              </button>
+              <button class="btn btn-danger btn-sm" onclick="confirmDeletePost('{{ post.id }}')" title="Cancelar">
+                ✕
+              </button>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="card">
+    <div class="empty-state">
+      <span class="empty-icon">📭</span>
+      <div class="empty-title">Nenhum post agendado</div>
+      <p class="empty-text">Agende seu primeiro post clicando no botão abaixo.</p>
+      <a href="/schedule" class="btn btn-primary">
+        ➕ Agendar Novo Post
+      </a>
+    </div>
+  </div>
+  {% endif %}
+</section>
+
+<!-- Recent Activity -->
+<section>
+  <h3 class="section-title">
+    <span class="section-icon">⚡</span> Atividade Recente
+  </h3>
+
+  <div class="card">
+    {% if recent_logs and recent_logs|length > 0 %}
+    <div class="activity-list">
+      {% for log in recent_logs %}
+      <div class="activity-item">
+        <div class="activity-icon {{ log.type or 'pending' }}">
+          {% if log.type == 'success' %}✅
+          {% elif log.type == 'failed' %}❌
+          {% else %}⏳{% endif %}
+        </div>
+        <div class="activity-content">
+          <div class="activity-text">{{ log.message }}</div>
+          <div class="activity-time">{{ log.time }}</div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state" style="padding: 32px;">
+      <span class="empty-icon" style="font-size: 2.5rem;">🔇</span>
+      <div class="empty-title">Sem atividade recente</div>
+      <p class="empty-text">As atividades de publicação aparecerão aqui.</p>
+    </div>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // Auto-refresh dashboard stats every 30 seconds
+  setInterval(() => {
+    refreshDashboard();
+  }, 30000);
+</script>
+{% endblock %}

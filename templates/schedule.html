@@ -1,0 +1,213 @@
+{% extends "base.html" %}
+
+{% block page_title %}Agendar Novo Post{% endblock %}
+{% block page_subtitle %}<p class="header-subtitle">Crie e agende uma nova publicação</p>{% endblock %}
+
+{% block content %}
+<form id="scheduleForm" class="schedule-form" enctype="multipart/form-data">
+  <div class="form-row" style="grid-template-columns: 2fr 1fr; align-items: start;">
+    <!-- Left Column: Main Form -->
+    <div>
+      <!-- Profile Selector -->
+      <div class="form-group">
+        <label class="form-label">👤 Selecionar Perfil</label>
+        <select class="form-select" id="profileSelect" name="profile_id" required>
+          <option value="" disabled selected>Carregando perfis…</option>
+        </select>
+      </div>
+
+      <!-- Post Type Selector -->
+      <div class="form-group">
+        <label class="form-label">📌 Tipo de Post</label>
+        <div class="type-selector" id="typeSelector">
+          <div class="type-card" data-type="photo" onclick="selectPostType(this)">
+            <span class="type-icon">📷</span>
+            <span class="type-label">Foto</span>
+          </div>
+          <div class="type-card" data-type="reel" onclick="selectPostType(this)">
+            <span class="type-icon">🎬</span>
+            <span class="type-label">Reel</span>
+          </div>
+          <div class="type-card" data-type="carousel" onclick="selectPostType(this)">
+            <span class="type-icon">🖼️</span>
+            <span class="type-label">Carrossel</span>
+          </div>
+          <div class="type-card" data-type="story" onclick="selectPostType(this)">
+            <span class="type-icon">📱</span>
+            <span class="type-label">Story</span>
+          </div>
+        </div>
+        <input type="hidden" id="postType" name="post_type" value="">
+      </div>
+
+      <!-- Media Upload -->
+      <div class="form-group">
+        <label class="form-label">🖼️ Mídia</label>
+        <div class="upload-zone" id="uploadZone">
+          <span class="upload-icon">☁️</span>
+          <div class="upload-text">
+            Arraste seus arquivos aqui ou <span class="upload-browse">clique para selecionar</span>
+          </div>
+          <div class="upload-hint" id="uploadHint">
+            Imagens (JPG, PNG, WebP) ou Vídeos (MP4, MOV) — máx. 50MB
+          </div>
+          <input type="file" id="mediaInput" name="media" accept="image/*,video/*" multiple>
+        </div>
+        <div class="media-preview-grid" id="mediaPreview"></div>
+      </div>
+
+      <!-- Aspect Ratio -->
+      <div class="form-group">
+        <label class="form-label">📐 Proporção</label>
+        <div class="type-selector" id="ratioSelector">
+          <div class="type-card selected" data-ratio="original" onclick="selectRatio(this)">
+            <span class="type-icon">🖼️</span>
+            <span class="type-label">Original</span>
+          </div>
+          <div class="type-card" data-ratio="1:1" onclick="selectRatio(this)">
+            <span class="type-icon" style="font-size:1.2rem;">⬜</span>
+            <span class="type-label">1:1</span>
+          </div>
+          <div class="type-card" data-ratio="4:5" onclick="selectRatio(this)">
+            <span class="type-icon" style="font-size:1.2rem;">▯</span>
+            <span class="type-label">4:5</span>
+          </div>
+          <div class="type-card" data-ratio="9:16" onclick="selectRatio(this)">
+            <span class="type-icon" style="font-size:1.2rem;">📱</span>
+            <span class="type-label">9:16</span>
+          </div>
+          <div class="type-card" data-ratio="16:9" onclick="selectRatio(this)">
+            <span class="type-icon" style="font-size:1.2rem;">🖥️</span>
+            <span class="type-label">16:9</span>
+          </div>
+        </div>
+        <input type="hidden" id="aspectRatio" name="aspect_ratio" value="original">
+      </div>
+
+      <!-- Cover Image (for Reels) -->
+      <div class="form-group hidden" id="coverGroup">
+        <label class="form-label">🎞️ Capa do Reel (opcional)</label>
+        <div class="upload-zone" style="padding: 24px;">
+          <span class="upload-icon" style="font-size: 2rem;">🖼️</span>
+          <div class="upload-text" style="font-size: 0.85rem;">Arraste a imagem de capa</div>
+          <input type="file" id="coverInput" name="cover" accept="image/*">
+        </div>
+        <div class="media-preview-grid" id="coverPreview"></div>
+      </div>
+
+      <!-- Caption -->
+      <div class="form-group">
+        <label class="form-label">✍️ Legenda</label>
+        <div style="display: flex; gap: 8px; margin-bottom: 8px; align-items: center;">
+          <select class="form-select" id="aiTone" style="flex: 0 0 auto; width: auto; min-width: 160px;">
+            <option value="descontraido">😎 Descontraído</option>
+            <option value="profissional">💼 Profissional</option>
+            <option value="engajamento">🔥 Engajamento</option>
+            <option value="informativo">📚 Informativo</option>
+          </select>
+          <button type="button" class="btn btn-secondary" id="generateCaptionBtn" onclick="generateCaption()">
+            ✨ Gerar Copy com IA
+          </button>
+        </div>
+        <textarea
+          class="form-textarea"
+          id="captionInput"
+          name="caption"
+          placeholder="Escreva a legenda do seu post…&#10;&#10;Use #hashtags e @menções&#10;&#10;Ou clique em 'Gerar Copy com IA' para gerar automaticamente"
+          maxlength="2200"
+          rows="5"
+        ></textarea>
+        <div class="char-counter" id="charCounter">
+          <span id="charCount">0</span> / 2.200 caracteres
+        </div>
+      </div>
+
+      <!-- Schedule Options -->
+      <div class="form-group">
+        <label class="form-label">📅 Agendamento</label>
+
+        <div class="form-check mb-2">
+          <label class="toggle-switch">
+            <input type="checkbox" id="publishNowToggle" name="publish_now">
+            <span class="toggle-slider"></span>
+          </label>
+          <span>Publicar agora</span>
+        </div>
+
+        <div id="scheduleTimeGroup">
+          <input
+            type="datetime-local"
+            class="form-input"
+            id="scheduledTime"
+            name="scheduled_time"
+            required
+          >
+          <p class="form-hint">Selecione a data e hora para publicação automática</p>
+        </div>
+      </div>
+
+      <!-- Submit Button -->
+      <div class="form-group">
+        <button type="submit" class="btn btn-primary btn-lg" id="submitBtn" style="width: 100%;">
+          <span class="btn-text" id="submitBtnText">📅 Agendar Post</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Right Column: Preview & Media Browser -->
+    <div>
+      <!-- Post Preview -->
+      <div class="card card-gradient mb-3">
+        <h4 class="section-title" style="font-size: 0.95rem;">
+          <span class="section-icon">👁️</span> Pré-visualização
+        </h4>
+        <div style="margin-top: 12px;">
+          <div id="previewMedia" style="
+            aspect-ratio: 1;
+            border-radius: var(--radius-md);
+            overflow: hidden;
+            background: var(--bg-glass);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 12px;
+            color: var(--text-muted);
+            font-size: 2.5rem;
+          ">
+            📷
+          </div>
+          <div id="previewCaption" style="
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            line-height: 1.5;
+            min-height: 40px;
+          ">
+            <span class="text-muted" style="font-style: italic;">A legenda aparecerá aqui…</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Media Folder Browser -->
+      <div class="card mb-3">
+        <h4 class="section-title" style="font-size: 0.95rem;">
+          <span class="section-icon">📂</span> Arquivos de Mídia
+        </h4>
+        <div class="media-browser" id="mediaBrowser">
+          <div class="loading-overlay" style="padding: 24px;">
+            <div class="spinner spinner-sm"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.addEventListener('DOMContentLoaded', () => {
+    initScheduleForm();
+    loadMediaFiles();
+  });
+</script>
+{% endblock %}

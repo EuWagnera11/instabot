@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+
+{% block page_title %}Configurações{% endblock %}
+{% block page_subtitle %}<p class="header-subtitle">Gerencie contas e preferências</p>{% endblock %}
+
+{% block content %}
+<section class="mb-4">
+  <h3 class="section-title"><span class="section-icon">👤</span> Contas Instagram</h3>
+  <div class="card">
+    <div id="profilesList" class="activity-list">
+      <div style="padding: 24px; text-align: center; color: var(--text-muted, #888);">Carregando...</div>
+    </div>
+    <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-color, #333);">
+      <h4 style="margin-bottom: 12px; font-size: 0.9rem;">Adicionar Nova Conta</h4>
+      <form id="addProfileForm" style="display: flex; gap: 8px; flex-wrap: wrap;">
+        <input type="text" id="profileName" placeholder="Nome (ex: Loja Principal)" class="form-input" style="flex: 1; min-width: 150px;" required>
+        <input type="text" id="profileUsername" placeholder="@usuario" class="form-input" style="flex: 1; min-width: 150px;">
+        <button type="submit" class="btn btn-primary">Adicionar</button>
+      </form>
+    </div>
+  </div>
+</section>
+
+<section class="mb-4">
+  <h3 class="section-title"><span class="section-icon">📂</span> Pasta de Mídia</h3>
+  <div class="card">
+    <form id="mediaFolderForm" style="display: flex; gap: 8px; align-items: end;">
+      <div style="flex: 1;">
+        <label class="form-label" style="font-size: 0.85rem;">Caminho da pasta local</label>
+        <input type="text" id="mediaFolderInput" class="form-input" placeholder="C:\Users\...\posts">
+      </div>
+      <button type="submit" class="btn btn-primary">Salvar</button>
+      <button type="button" class="btn btn-secondary" onclick="scanMedia()">Escanear</button>
+    </form>
+    <div id="mediaCount" style="margin-top: 8px; font-size: 0.8rem; color: var(--text-muted, #888);"></div>
+  </div>
+</section>
+
+<section class="mb-4">
+  <h3 class="section-title"><span class="section-icon">⏰</span> Agendamento</h3>
+  <div class="card">
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+      <div>
+        <label class="form-label" style="font-size: 0.85rem;">Fuso Horário</label>
+        <input type="text" id="timezoneInput" class="form-input" readonly>
+      </div>
+      <div>
+        <label class="form-label" style="font-size: 0.85rem;">Delay Mínimo entre Posts (seg)</label>
+        <input type="number" id="delayInput" class="form-input" readonly>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mb-4">
+  <h3 class="section-title"><span class="section-icon">🖥️</span> Sistema</h3>
+  <div class="card">
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <span>Scheduler:</span>
+      <span id="schedulerStatus" class="badge badge-pending">Verificando...</span>
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+  loadSettingsPage();
+});
+
+function loadSettingsPage() {
+  apiGet("/api/settings").then(function(data) {
+    if (data.settings) {
+      document.getElementById("mediaFolderInput").value = data.settings.media_folder || "";
+      document.getElementById("timezoneInput").value = data.settings.scheduler_timezone || "";
+      document.getElementById("delayInput").value = data.settings.min_post_delay || 300;
+      var badge = document.getElementById("schedulerStatus");
+      if (data.settings.scheduler_running) {
+        badge.className = "badge badge-published";
+        badge.textContent = "Ativo";
+      } else {
+        badge.className = "badge badge-failed";
+        badge.textContent = "Parado";
+      }
+    }
+  });
+  loadProfilesList();
+}
+
+function loadProfilesList() {
+  var container = document.getElementById("profilesList");
+  apiGet("/api/profiles").then(function(data) {
+    if (!data.profiles || data.profiles.length === 0) {
+      container.innerHTML = "<div style=\"padding:16px;text-align:center;color:var(--text-muted,#888);\">Nenhuma conta cadastrada.</div>";
+      return;
+    }
+    var html = "";
+    data.profiles.forEach(function(p) {
+      var dotClass = p.login_status === "logged_in" ? "online" : "offline";
+      var username = p.instagram_username ? " <span style=\"color:var(--text-muted,#888)\">@" + p.instagram_username + "</span>" : "";
+      html += "<div style=\"display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--border-color,#333);\">";
+      html += "<div style=\"display:flex;align-items:center;gap:12px;\"><span class=\"status-dot " + dotClass + "\"></span><div><strong>" + p.name + "</strong>" + username;
+      html += "<div style=\"font-size:0.75rem;color:var(--text-muted,#888);\">Status: " + (p.login_status || "unknown") + "</div></div></div>";
+      html += "<div style=\"display:flex;gap:6px;\">";
+      html += "<button class=\"btn btn-primary btn-sm\" onclick=\"loginProfile(" + p.id + ")\">Login</button>";
+      html += "<button class=\"btn btn-secondary btn-sm\" onclick=\"checkProfileLogin(" + p.id + ")\">Verificar</button>";
+      html += "<button class=\"btn btn-danger btn-sm\" onclick=\"deleteProfile(" + p.id + ")\">Remover</button>";
+      html += "</div></div>";
+    });
+    container.innerHTML = html;
+  }).catch(function() {
+    container.innerHTML = "<div style=\"padding:16px;\">Erro ao carregar perfis.</div>";
+  });
+}
+
+document.getElementById("addProfileForm").addEventListener("submit", function(e) {
+  e.preventDefault();
+  var name = document.getElementById("profileName").value.trim();
+  var username = document.getElementById("profileUsername").value.trim().replace("@", "");
+  if (!name) return;
+  apiPost("/api/profiles", { name: name, instagram_username: username }).then(function() {
+    showToast("Conta adicionada!", "success");
+    document.getElementById("profileName").value = "";
+    document.getElementById("profileUsername").value = "";
+    loadProfilesList();
+  });
+});
+
+function loginProfile(id) {
+  apiPost("/api/profiles/" + id + "/login", {}).then(function() {
+    showToast("Chrome aberto. Faça login no Instagram.", "info");
+  });
+}
+
+function checkProfileLogin(id) {
+  apiPost("/api/profiles/" + id + "/login/check", {}).then(function(data) {
+    if (data.logged_in) {
+      showToast("Sessão válida!", "success");
+    } else {
+      showToast("Sessão expirada. Faça login novamente.", "warning");
+    }
+    loadProfilesList();
+  });
+}
+
+function deleteProfile(id) {
+  if (!confirm("Remover esta conta? Posts pendentes serão cancelados.")) return;
+  apiDelete("/api/profiles/" + id).then(function() {
+    showToast("Conta removida.", "success");
+    loadProfilesList();
+  });
+}
+
+document.getElementById("mediaFolderForm").addEventListener("submit", function(e) {
+  e.preventDefault();
+  var folder = document.getElementById("mediaFolderInput").value.trim();
+  if (!folder) return;
+  apiPost("/api/settings", { media_folder: folder }).then(function() {
+    showToast("Pasta de mídia atualizada.", "success");
+  });
+});
+
+function scanMedia() {
+  apiGet("/api/media").then(function(data) {
+    var count = data.items ? data.items.length : 0;
+    document.getElementById("mediaCount").textContent = count + " arquivo(s) encontrado(s).";
+    showToast(count + " arquivo(s) de mídia encontrado(s).", "info");
+  });
+}
+</script>
+{% endblock %}

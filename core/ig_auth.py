@@ -104,6 +104,7 @@ class IGAuth:
 
         elif result.get("two_factor_required"):
             two_factor_info = result.get("two_factor_info", {})
+            logger.info("2FA required. Info: %s", json.dumps(two_factor_info, indent=2)[:500])
             partial_data = {
                 "username": username,
                 "two_factor_identifier": two_factor_info.get("two_factor_identifier"),
@@ -152,6 +153,7 @@ class IGAuth:
             "username": data["username"],
             "verificationCode": code,
             "identifier": data["two_factor_identifier"],
+            "trust_signal": "true",
         }
 
         try:
@@ -161,6 +163,7 @@ class IGAuth:
                 headers=headers,
                 timeout=30,
             )
+            logger.info("2FA response status=%d body=%s", resp.status_code, resp.text[:300])
             result = resp.json()
         except Exception as exc:
             raise IGAuthError(f"Erro ao verificar 2FA: {exc}") from exc

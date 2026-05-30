@@ -39,25 +39,21 @@ class InstagramPosterError(Exception):
 
 
 class InstagramPoster:
-    """Publicador de conteúdo no Instagram via APIs internas.
+    """Publicador de conteudo no Instagram via APIs internas.
 
-    Utiliza uma página do Playwright (Chrome com perfil persistente)
-    para extrair cookies e CSRF token, e então faz as chamadas HTTP
-    usando uma sessão ``requests`` configurada.
+    Aceita uma requests.Session ja autenticada (via IGAuth) ou
+    uma page do Playwright (modo legado).
 
     Args:
-        page: Objeto ``Page`` do Playwright conectado ao Instagram.
+        session: requests.Session autenticada (preferencial).
+        csrf_token: Token CSRF da sessao.
+        page: Objeto Page do Playwright (modo legado, opcional).
     """
 
-    def __init__(self, page: Any) -> None:
-        """Inicializa o publicador do Instagram.
-
-        Args:
-            page: Instância de Page do Playwright com sessão ativa do Instagram.
-        """
+    def __init__(self, session: requests.Session | None = None, csrf_token: str | None = None, page: Any = None) -> None:
         self.page = page
-        self._csrf_token: str | None = None
-        self._session: requests.Session | None = None
+        self._csrf_token: str | None = csrf_token
+        self._session: requests.Session | None = session
         self._ig_app_id: str = Config.IG_APP_ID
 
     # ==================================================================
@@ -65,16 +61,18 @@ class InstagramPoster:
     # ==================================================================
 
     async def _get_session(self) -> requests.Session:
-        """Cria uma sessão ``requests`` com cookies do navegador.
+        """Retorna a sessao requests autenticada.
 
-        Extrai todos os cookies do contexto do Playwright e configura
-        uma sessão HTTP pronta para fazer chamadas autenticadas.
-
-        Returns:
-            Sessão requests configurada com cookies do Instagram.
+        Se ja foi fornecida no construtor (via IGAuth), retorna diretamente.
+        Caso contrario, extrai cookies do Playwright (modo legado).
         """
         if self._session is not None:
             return self._session
+
+        if self.page is None:
+            raise InstagramPosterError(
+                "Nenhuma sessao autenticada disponivel. Faca login primeiro."
+            )
 
         context = self.page.context
         cookies = await context.cookies("https://www.instagram.com")
@@ -102,19 +100,25 @@ class InstagramPoster:
         return session
 
     async def get_csrf_token(self) -> str:
-        """Obtém o token CSRF da sessão do Instagram.
+        """Obtem o token CSRF da sessao do Instagram.
 
-        Navega até o Instagram (se necessário) e extrai o CSRF token
-        do conteúdo da página usando regex.
-
-        Returns:
-            Token CSRF como string.
-
-        Raises:
-            InstagramPosterError: Se o token não puder ser extraído.
+        Se fornecido no construtor, retorna diretamente.
+        Caso contrario, tenta extrair dos cookies da sessao ou do Playwright.
         """
         if self._csrf_token:
             return self._csrf_token
+
+        # Tenta extrair dos cookies da sessao
+        if self._session:
+            token = self._session.cookies.get("csrftoken")
+            if token:
+                self._csrf_token = token
+                return token
+
+        if self.page is None:
+            raise InstagramPosterError(
+                "Nenhum CSRF token disponivel. Faca login primeiro."
+            )
 
         try:
             # Garante que estamos no Instagram

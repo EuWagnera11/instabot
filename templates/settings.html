@@ -128,8 +128,31 @@ document.getElementById("addProfileForm").addEventListener("submit", function(e)
 });
 
 function loginProfile(id) {
-  apiPost("/api/profiles/" + id + "/login", {}).then(function() {
-    showToast("Chrome aberto. Faça login no Instagram.", "info");
+  var username = prompt("Username do Instagram (sem @):");
+  if (!username) return;
+  var password = prompt("Senha do Instagram:");
+  if (!password) return;
+
+  apiPost("/api/profiles/" + id + "/login", { username: username, password: password }).then(function(data) {
+    if (data.success) {
+      showToast("Login realizado com sucesso!", "success");
+      loadProfilesList();
+    } else if (data.requires_2fa) {
+      var code = prompt("Digite o código 2FA (6 dígitos):");
+      if (!code) return;
+      apiPost("/api/profiles/" + id + "/login/2fa", { code: code }).then(function(data2) {
+        if (data2.success) {
+          showToast("Login com 2FA realizado!", "success");
+        } else {
+          showToast(data2.error || "Código inválido.", "error");
+        }
+        loadProfilesList();
+      });
+    } else {
+      showToast(data.error || data.message || "Erro no login.", "error");
+    }
+  }).catch(function(err) {
+    showToast("Erro no login: " + (err.message || err), "error");
   });
 }
 

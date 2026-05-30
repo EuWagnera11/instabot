@@ -133,72 +133,65 @@ class PostScheduler:
             self._emit("post_failed", {"post_id": post_id, "error": error_msg})
 
     async def _async_publish(self, post: dict) -> dict:
-        from core.browser import BrowserManager
+        from core.ig_auth import IGAuth, IGAuthError
+        from core.instagram import InstagramPoster
         from core.media import IMAGE_EXTENSIONS, ALL_MEDIA_EXTENSIONS
         from pathlib import Path
 
         profile_id = post["profile_id"]
-        bm = BrowserManager(profile_id=profile_id, headless=True)
-        await bm.start()
+        auth = IGAuth(profile_id)
 
-        try:
-            page = await bm.get_page()
+        if not auth.is_logged_in():
+            raise RuntimeError(
+                f"Perfil {profile_id} não está logado no Instagram."
+            )
 
-            if "instagram.com" not in page.url:
-                await page.goto(
-                    "https://www.instagram.com/",
-                    wait_until="domcontentloaded",
-                    timeout=30000,
-                )
-                await page.wait_for_timeout(3000)
+        session = auth.get_session()
+        csrf_token = auth.get_csrf_token()
 
-            is_logged = await bm.is_logged_in()
-            if not is_logged:
-                raise RuntimeError(
-                    f"Perfil {profile_id} não está logado no Instagram."
-                )
+        if not session or not csrf_token:
+            raise RuntimeError(
+                f"Sessão inválida para perfil {profile_id}. Faça login novamente."
+            )
 
-            poster = self.poster_factory(page)
-            post_type = post["post_type"]
-            media_path = post["media_path"]
-            caption = post.get("caption", "")
+        poster = InstagramPoster(session=session, csrf_token=csrf_token)
+        post_type = post["post_type"]
+        media_path = post["media_path"]
+        caption = post.get("caption", "")
 
-            if post_type == "photo":
-                return await poster.post_photo(media_path, caption)
+        if post_type == "photo":
+            return await poster.post_photo(media_path, caption)
 
-            elif post_type == "reel":
-                video_path = Path(media_path)
-                cover_path: str | None = None
-                for ext in IMAGE_EXTENSIONS:
-                    candidate = video_path.parent / f"{video_path.stem}_cover{ext}"
-                    if candidate.exists():
-                        cover_path = str(candidate)
-                        break
-                return await poster.post_reel(media_path, caption, cover_path=cover_path)
+        elif post_type == "reel":
+            video_path = Path(media_path)
+            cover_path: str | None = None
+            for ext in IMAGE_EXTENSIONS:
+                candidate = video_path.parent / f"{video_path.stem}_cover{ext}"
+                if candidate.exists():
+                    cover_path = str(candidate)
+                    break
+            return await poster.post_reel(media_path, caption, cover_path=cover_path)
 
-            elif post_type == "carousel":
-                # media_path pode ser JSON array ou diretório
-                try:
-                    file_paths = json.loads(media_path)
-                except (json.JSONDecodeError, TypeError):
-                    folder = Path(media_path)
-                    if folder.is_dir():
-                        file_paths = [
-                            str(f) for f in sorted(folder.iterdir())
-                            if f.suffix.lower() in ALL_MEDIA_EXTENSIONS
-                        ]
-                    else:
-                        file_paths = [media_path]
-                return await poster.post_carousel(file_paths, caption)
+        elif post_type == "carousel":
+            # media_path pode ser JSON array ou diretório
+            try:
+                file_paths = json.loads(media_path)
+            except (json.JSONDecodeError, TypeError):
+                folder = Path(media_path)
+                if folder.is_dir():
+                    file_paths = [
+                        str(f) for f in sorted(folder.iterdir())
+                        if f.suffix.lower() in ALL_MEDIA_EXTENSIONS
+                    ]
+                else:
+                    file_paths = [media_path]
+            return await poster.post_carousel(file_paths, caption)
 
-            elif post_type == "story":
-                return await poster.post_story(media_path)
+        elif post_type == "story":
+            return await poster.post_story(media_path)
 
-            else:
-                raise ValueError(f"Tipo de post desconhecido: {post_type}")
-
-        finally:
-            await bm.stop()
+        else:
+            raise ValueError(f"Tipo de post desconhecido: {post_type}")
 
     def _check_pending_posts(self) -> None:
         try:

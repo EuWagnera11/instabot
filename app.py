@@ -25,6 +25,7 @@ from config import Config
 from core.database import Database
 from core.browser import BrowserManager, run_login_flow
 from core.instagram import InstagramPoster
+from core.ig_auth import IGAuth, IGAuthError
 from core.media import MediaManager, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, ALL_MEDIA_EXTENSIONS, resize_image
 from core.scheduler import PostScheduler
 from core.ai_caption import AICaptionGenerator
@@ -56,7 +57,7 @@ ai_generator = AICaptionGenerator()
 
 scheduler = PostScheduler(
     db=db,
-    instagram_poster_factory=lambda page: InstagramPoster(page),
+    instagram_poster_factory=None,
 )
 
 # SSE event bus
@@ -332,23 +333,58 @@ def api_delete_profile(profile_id: int):
 
 @app.route("/api/profiles/<int:profile_id>/login", methods=["POST"])
 def api_profile_login(profile_id: int):
+    """Login via username/senha (API, sem navegador)."""
     profile = db.get_profile(profile_id)
     if not profile:
         return jsonify({"error": "Perfil não encontrado."}), 404
 
-    def _do_login():
-        try:
-            success = run_login_flow(profile_id)
-            status = "logged_in" if success else "failed"
-            db.update_profile_login_status(profile_id, status)
-            emit_event("login_status", {"profile_id": profile_id, "status": status})
-        except Exception as exc:
-            logger.error("Erro no login do perfil %d: %s", profile_id, exc)
-            db.update_profile_login_status(profile_id, "failed")
+    data = request.get_json(silent=True) or {}
+    username = data.get("username", "").strip()
+    password = data.get("password", "").strip()
 
-    thread = threading.Thread(target=_do_login, daemon=True)
-    thread.start()
-    return jsonify({"success": True, "message": "Chrome aberto. Faça login no Instagram."})
+    if not username or not password:
+        return jsonify({"error": "Username e senha são obrigatórios."}), 400
+
+    auth = IGAuth(profile_id)
+    try:
+        result = auth.login(username, password)
+        db.update_profile_login_status(profile_id, "logged_in")
+        emit_event("login_status", {"profile_id": profile_id, "status": "logged_in"})
+        return jsonify({"success": True, "username": result.get("username")})
+    except IGAuthError as exc:
+        msg = str(exc)
+        if msg == "2FA_REQUIRED":
+            db.update_profile_login_status(profile_id, "2fa_pending")
+            return jsonify({"success": False, "requires_2fa": True, "message": "Digite o código 2FA."})
+        elif msg.startswith("CHECKPOINT:"):
+            db.update_profile_login_status(profile_id, "checkpoint")
+            return jsonify({"success": False, "checkpoint": True, "message": "Instagram pediu verificação. Abra o app e confirme."}), 403
+        else:
+            db.update_profile_login_status(profile_id, "failed")
+            return jsonify({"error": msg}), 401
+
+
+@app.route("/api/profiles/<int:profile_id>/login/2fa", methods=["POST"])
+def api_profile_login_2fa(profile_id: int):
+    """Verifica código 2FA."""
+    profile = db.get_profile(profile_id)
+    if not profile:
+        return jsonify({"error": "Perfil não encontrado."}), 404
+
+    data = request.get_json(silent=True) or {}
+    code = data.get("code", "").strip()
+
+    if not code:
+        return jsonify({"error": "Código 2FA é obrigatório."}), 400
+
+    auth = IGAuth(profile_id)
+    try:
+        result = auth.verify_2fa(code)
+        db.update_profile_login_status(profile_id, "logged_in")
+        emit_event("login_status", {"profile_id": profile_id, "status": "logged_in"})
+        return jsonify({"success": True, "username": result.get("username")})
+    except IGAuthError as exc:
+        return jsonify({"error": str(exc)}), 401
 
 
 @app.route("/api/profiles/<int:profile_id>/login/status", methods=["GET"])
@@ -356,35 +392,34 @@ def api_profile_login_status(profile_id: int):
     profile = db.get_profile(profile_id)
     if not profile:
         return jsonify({"error": "Perfil não encontrado."}), 404
-    bm = BrowserManager(profile_id=profile_id, headless=True)
+    auth = IGAuth(profile_id)
     return jsonify({
         "success": True,
         "login_status": profile.get("login_status", "unknown"),
-        "has_saved_profile": bm.has_saved_profile(),
+        "logged_in": auth.is_logged_in(),
+        "user_info": auth.get_user_info(),
     })
 
 
 @app.route("/api/profiles/<int:profile_id>/login/check", methods=["POST"])
 def api_check_profile_login(profile_id: int):
-    async def _check():
-        bm = BrowserManager(profile_id=profile_id, headless=True)
-        await bm.start()
-        try:
-            result = await bm.is_logged_in()
-            status = "logged_in" if result else "expired"
-            db.update_profile_login_status(profile_id, status)
-            return result
-        finally:
-            await bm.stop()
+    """Verifica se a sessão ainda é válida."""
+    auth = IGAuth(profile_id)
+    if auth.is_logged_in():
+        db.update_profile_login_status(profile_id, "logged_in")
+        return jsonify({"success": True, "logged_in": True})
+    else:
+        db.update_profile_login_status(profile_id, "expired")
+        return jsonify({"success": True, "logged_in": False})
 
-    loop = asyncio.new_event_loop()
-    try:
-        result = loop.run_until_complete(_check())
-        return jsonify({"success": True, "logged_in": result})
-    except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
-    finally:
-        loop.close()
+
+@app.route("/api/profiles/<int:profile_id>/logout", methods=["POST"])
+def api_profile_logout(profile_id: int):
+    """Remove sessão salva."""
+    auth = IGAuth(profile_id)
+    auth.logout()
+    db.update_profile_login_status(profile_id, "logged_out")
+    return jsonify({"success": True})
 
 
 # ===========================================================================

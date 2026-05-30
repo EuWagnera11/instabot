@@ -1,3 +1,9 @@
 data/
 __pycache__/
 *.pyc
+*.pyo
+_write.py
+*.db
+*.db-shm
+*.db-wal
+*.log

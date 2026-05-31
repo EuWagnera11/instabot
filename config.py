@@ -24,14 +24,14 @@ class Config:
     # --- Instagram ---
     IG_APP_ID: str = '936619743392459'
 
-    # --- IA (API compatível com OpenAI) ---
-    AI_API_URL: str = os.getenv('INSTABOT_AI_URL', 'https://api.aibee.cloud')
-    AI_API_KEY: str = os.getenv('INSTABOT_AI_KEY', 'sk-kpa-9418aa3ea4fef7e450d32cd23f7fd78b0465e1b24e49aba1577b92d37deef258')
-    AI_MODEL: str = os.getenv('INSTABOT_AI_MODEL', 'claude-sonnet-4-6')
+    # --- IA (OpenAI API) ---
+    AI_API_URL: str = os.getenv('INSTABOT_AI_URL', 'https://api.openai.com')
+    AI_API_KEY: str = os.getenv('INSTABOT_AI_KEY', '')
+    AI_MODEL: str = os.getenv('INSTABOT_AI_MODEL', 'gpt-4o-mini')
 
     # --- Limites ---
     MIN_POST_DELAY: int = int(os.getenv('INSTABOT_MIN_POST_DELAY', '300'))
-    MAX_UPLOAD_SIZE: int = 50 * 1024 * 1024
+    MAX_UPLOAD_SIZE: int = 500 * 1024 * 1024  # 500MB para bulk uploads
 
     # --- Flask ---
     SECRET_KEY: str = os.getenv('FLASK_SECRET_KEY', 'instabot-dev-key-change-me')

@@ -2,6 +2,7 @@ import logging
 import sqlite3
 from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 from typing import Any
 
 from config import Config
@@ -117,7 +118,7 @@ class Database:
     def update_profile_login_status(self, profile_id: int, status: str) -> None:
         self.conn.execute(
             "UPDATE profiles SET login_status = ?, last_login_check = ? WHERE id = ?",
-            (status, datetime.utcnow().isoformat(), profile_id),
+            (status, datetime.now(ZoneInfo(Config.SCHEDULER_TIMEZONE)).isoformat(), profile_id),
         )
         self.conn.commit()
 
@@ -168,7 +169,7 @@ class Database:
         return [dict(row) for row in rows]
 
     def get_pending_posts(self) -> list[dict]:
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(ZoneInfo(Config.SCHEDULER_TIMEZONE)).strftime("%Y-%m-%dT%H:%M:%S")
         rows = self.conn.execute(
             """
             SELECT sp.*, p.name AS profile_name
@@ -200,7 +201,7 @@ class Database:
         error: str | None = None,
     ) -> None:
         published_at = (
-            datetime.utcnow().isoformat() if status == "published" else None
+            datetime.now(ZoneInfo(Config.SCHEDULER_TIMEZONE)).strftime("%Y-%m-%dT%H:%M:%S") if status == "published" else None
         )
         self.conn.execute(
             """

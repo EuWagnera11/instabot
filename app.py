@@ -215,9 +215,10 @@ def api_create_post():
         return jsonify({"error": f"post_type inválido. Aceitos: {valid_types}"}), 400
 
     if publish_now:
-        scheduled_at = datetime.utcnow().isoformat()
+        scheduled_at = datetime.now(_tz).strftime("%Y-%m-%dT%H:%M:%S")
     elif scheduled_time:
-        scheduled_at = _local_to_utc(scheduled_time)
+        dt = datetime.fromisoformat(scheduled_time)
+        scheduled_at = dt.strftime("%Y-%m-%dT%H:%M:%S")
     else:
         return jsonify({"error": "Informe scheduled_time ou publish_now."}), 400
 
@@ -244,7 +245,8 @@ def api_get_posts():
 def api_update_post(post_id: int):
     data = request.get_json(silent=True) or {}
     if "scheduled_at" in data:
-        data["scheduled_at"] = _local_to_utc(data["scheduled_at"])
+        dt = datetime.fromisoformat(data["scheduled_at"])
+        data["scheduled_at"] = dt.strftime("%Y-%m-%dT%H:%M:%S")
         scheduler.cancel_post(post_id)
         scheduler.schedule_post(post_id, data["scheduled_at"])
     updated = db.update_post(**data, post_id=post_id)
@@ -267,11 +269,29 @@ def api_publish_now(post_id: int):
     post = db.get_post(post_id)
     if not post or post["status"] != "pending":
         return jsonify({"error": "Post não encontrado ou não está pendente."}), 404
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(_tz).strftime("%Y-%m-%dT%H:%M:%S")
     scheduler.cancel_post(post_id)
     scheduler.schedule_post(post_id, now)
     db.add_log(post_id, "publicacao_imediata", "Publicação imediata solicitada")
     return jsonify({"success": True, "message": "Publicação imediata iniciada."})
+
+
+@app.route("/api/posts/<int:post_id>", methods=["GET"])
+def api_get_post(post_id: int):
+    post = db.get_post(post_id)
+    if not post:
+        return jsonify({"error": "Post não encontrado."}), 404
+    logs = db.get_logs(post_id)
+    profile = db.get_profile(post["profile_id"])
+    return jsonify({
+        "success": True,
+        "post": {
+            **post,
+            "profile_name": profile["name"] if profile else "—",
+            "instagram_username": profile.get("instagram_username", "") if profile else "",
+        },
+        "logs": logs,
+    })
 
 
 @app.route("/api/posts/<int:post_id>/logs", methods=["GET"])
@@ -420,6 +440,97 @@ def api_profile_logout(profile_id: int):
     auth.logout()
     db.update_profile_login_status(profile_id, "logged_out")
     return jsonify({"success": True})
+
+
+# ---------------------------------------------------------------------------
+# Login via navegador Chrome (abre aba para login manual)
+# ---------------------------------------------------------------------------
+
+_browser_login_sessions: dict[int, dict] = {}
+_browser_login_lock = threading.Lock()
+
+
+@app.route("/api/profiles/<int:profile_id>/login/browser", methods=["POST"])
+def api_profile_login_browser(profile_id: int):
+    """Inicia login via navegador Chrome visível.
+
+    Abre o Chrome com a página de login do Instagram para que o
+    usuário faça login manualmente (suporta 2FA, checkpoint, etc.).
+    """
+    profile = db.get_profile(profile_id)
+    if not profile:
+        return jsonify({"error": "Perfil não encontrado."}), 404
+
+    with _browser_login_lock:
+        session_info = _browser_login_sessions.get(profile_id)
+        if session_info and session_info.get("status") == "waiting":
+            return jsonify({
+                "success": True,
+                "status": "waiting",
+                "message": "Navegador já está aberto. Faça login na janela do Chrome.",
+            })
+
+    def _run_browser_login():
+        with _browser_login_lock:
+            _browser_login_sessions[profile_id] = {
+                "status": "waiting",
+                "message": "Abrindo Chrome...",
+            }
+
+        db.update_profile_login_status(profile_id, "browser_login")
+        emit_event("login_status", {"profile_id": profile_id, "status": "browser_login"})
+
+        try:
+            success = run_login_flow(profile_id)
+            if success:
+                with _browser_login_lock:
+                    _browser_login_sessions[profile_id] = {
+                        "status": "success",
+                        "message": "Login realizado com sucesso!",
+                    }
+                db.update_profile_login_status(profile_id, "logged_in")
+                emit_event("login_status", {"profile_id": profile_id, "status": "logged_in"})
+                logger.info("Login via browser OK (profile_id=%d)", profile_id)
+            else:
+                with _browser_login_lock:
+                    _browser_login_sessions[profile_id] = {
+                        "status": "failed",
+                        "message": "Login expirou ou foi cancelado.",
+                    }
+                db.update_profile_login_status(profile_id, "failed")
+                emit_event("login_status", {"profile_id": profile_id, "status": "failed"})
+        except Exception as exc:
+            logger.error("Erro no login via browser: %s", exc)
+            with _browser_login_lock:
+                _browser_login_sessions[profile_id] = {
+                    "status": "error",
+                    "message": f"Erro: {exc}",
+                }
+            db.update_profile_login_status(profile_id, "failed")
+
+    thread = threading.Thread(target=_run_browser_login, daemon=True)
+    thread.start()
+
+    return jsonify({
+        "success": True,
+        "status": "waiting",
+        "message": "Chrome aberto! Faça login na janela que apareceu.",
+    })
+
+
+@app.route("/api/profiles/<int:profile_id>/login/browser/status", methods=["GET"])
+def api_profile_login_browser_status(profile_id: int):
+    """Retorna o status do login via browser."""
+    with _browser_login_lock:
+        session_info = _browser_login_sessions.get(profile_id)
+
+    if not session_info:
+        return jsonify({"status": "idle", "message": "Nenhum login em andamento."})
+
+    return jsonify({
+        "status": session_info["status"],
+        "message": session_info["message"],
+    })
 
 
 # ===========================================================================
@@ -593,7 +704,7 @@ def api_posts_bulk():
     created_posts = []
     for i, (path, caption) in enumerate(zip(media_paths, captions)):
         scheduled_dt = base_date + timedelta(days=i * interval_days)
-        scheduled_at = _local_to_utc(scheduled_dt.isoformat())
+        scheduled_at = scheduled_dt.strftime("%Y-%m-%dT%H:%M:%S")
 
         post_id = db.add_post(
             profile_id=int(profile_id),

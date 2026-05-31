@@ -131,18 +131,86 @@ class BrowserManager:
 
 
 def run_login_flow(profile_id: int) -> bool:
+    """Abre Chrome visível para o usuário fazer login manualmente.
+
+    Após login bem-sucedido, extrai cookies do navegador e salva em
+    session.json para que IGAuth possa usar a sessão autenticada.
+    """
+    import json
+    import time
+
     async def _login():
         bm = BrowserManager(profile_id=profile_id, headless=False)
         await bm.start()
         is_logged = await bm.is_logged_in()
         if is_logged:
             logger.info("Já está logado (profile_id=%d)", profile_id)
+            await _save_browser_session(bm, profile_id)
             await bm.stop()
             return True
         await bm.open_login_page()
         success = await bm.wait_for_login(timeout_seconds=300)
+        if success:
+            await _save_browser_session(bm, profile_id)
         await bm.stop()
         return success
+
+    async def _save_browser_session(bm: BrowserManager, pid: int):
+        """Extrai cookies do navegador e salva em session.json."""
+        try:
+            page = await bm.get_page()
+            context = page.context
+            cookies = await context.cookies("https://www.instagram.com")
+
+            cookie_dict = {}
+            csrf_token = ""
+            user_id = ""
+            username = ""
+
+            for c in cookies:
+                cookie_dict[c["name"]] = c["value"]
+                if c["name"] == "csrftoken":
+                    csrf_token = c["value"]
+                if c["name"] == "ds_user_id":
+                    user_id = c["value"]
+
+            # Tenta extrair username da página
+            try:
+                username = await page.evaluate(
+                    """() => {
+                        try {
+                            const el = document.querySelector('img[data-testid="user-avatar"]');
+                            if (el) return el.alt || '';
+                            // Fallback: tenta extrair do cookie ou URL
+                            return '';
+                        } catch { return ''; }
+                    }"""
+                )
+                if not username:
+                    # Tenta via cookie sessionid ou via navegação
+                    username = cookie_dict.get("ds_user", "")
+            except Exception:
+                pass
+
+            session_file = Path(Config.PROFILES_DIR) / str(pid) / "session.json"
+            session_file.parent.mkdir(parents=True, exist_ok=True)
+
+            session_data = {
+                "username": username or f"user_{user_id}",
+                "user_id": user_id,
+                "csrf_token": csrf_token,
+                "cookies": cookie_dict,
+                "logged_at": time.time(),
+                "login_method": "browser",
+            }
+
+            session_file.write_text(json.dumps(session_data, indent=2))
+            logger.info(
+                "Sessão do navegador salva para profile_id=%d (user_id=%s)",
+                pid, user_id,
+            )
+        except Exception as exc:
+            logger.error("Erro ao salvar sessão do navegador: %s", exc)
 
     loop = asyncio.new_event_loop()
     try:

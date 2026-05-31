@@ -1,8 +1,9 @@
 import asyncio
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Callable
+from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -23,9 +24,10 @@ class PostScheduler:
         self.db = db
         self.poster_factory = instagram_poster_factory
         self._last_post_time: dict[int, datetime] = {}
+        self._tz = ZoneInfo(Config.SCHEDULER_TIMEZONE)
 
         self._scheduler = BackgroundScheduler(
-            timezone="UTC",
+            timezone=Config.SCHEDULER_TIMEZONE,
             job_defaults={
                 "coalesce": True,
                 "max_instances": 3,
@@ -45,7 +47,7 @@ class PostScheduler:
         )
         self._scheduler.start()
         self._running = True
-        logger.info("Scheduler iniciado.")
+        logger.info("Scheduler iniciado (timezone=%s).", Config.SCHEDULER_TIMEZONE)
 
     def stop(self) -> None:
         if not self._running:
@@ -58,14 +60,22 @@ class PostScheduler:
     def is_running(self) -> bool:
         return self._running
 
+    def _now(self) -> datetime:
+        """Retorna datetime atual no timezone configurado."""
+        return datetime.now(self._tz)
+
     def schedule_post(self, post_id: int, scheduled_time: datetime | str) -> str:
         if isinstance(scheduled_time, str):
             scheduled_time = datetime.fromisoformat(scheduled_time)
 
+        # Garante que o horário tem timezone
+        if scheduled_time.tzinfo is None:
+            scheduled_time = scheduled_time.replace(tzinfo=self._tz)
+
         job_id = f"post_{post_id}"
 
         # Se o horário já passou, executa imediatamente
-        now = datetime.utcnow()
+        now = self._now()
         if scheduled_time <= now:
             self._scheduler.add_job(
                 self._execute_post,
@@ -104,7 +114,7 @@ class PostScheduler:
         # Respeita delay mínimo entre posts da mesma conta
         last = self._last_post_time.get(profile_id)
         if last:
-            elapsed = (datetime.utcnow() - last).total_seconds()
+            elapsed = (self._now() - last).total_seconds()
             if elapsed < Config.MIN_POST_DELAY:
                 wait = Config.MIN_POST_DELAY - int(elapsed)
                 logger.info("Aguardando %ds para perfil %d (delay mínimo)", wait, profile_id)
@@ -121,7 +131,7 @@ class PostScheduler:
                 result = loop.run_until_complete(self._async_publish(post))
                 self.db.add_log(post_id, "publicado", f"Concluído: {result}")
                 self.db.update_post_status(post_id, "published")
-                self._last_post_time[profile_id] = datetime.utcnow()
+                self._last_post_time[profile_id] = self._now()
                 self._emit("post_published", {"post_id": post_id, "profile_id": profile_id})
             finally:
                 loop.close()

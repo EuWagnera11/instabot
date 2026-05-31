@@ -58,14 +58,15 @@
         <input type="file" id="bulkMediaInput" accept="image/*,video/*" multiple>
       </div>
     </div>
-    <div style="display:flex;gap:8px;">
-      <button class="btn btn-secondary" onclick="bulkGenerateCaptions()" id="btnGenerateCaptions" disabled>&#10024; Gerar Copys com IA</button>
-      <button class="btn btn-primary" onclick="bulkScheduleAll()" id="btnScheduleAll" disabled>Agendar Todos</button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn btn-secondary" onclick="bulkGenerateMissing()" id="btnGenerateMissing" disabled>✨ Gerar Faltantes</button>
+      <button class="btn btn-secondary" onclick="bulkGenerateAll()" id="btnGenerateAll" disabled>🔄 Regerar Todos</button>
+      <button class="btn btn-primary" onclick="bulkScheduleAll()" id="btnScheduleAll" disabled>📅 Agendar Todos</button>
     </div>
   </div>
   <div>
     <div class="card">
-      <h4 class="section-title" style="font-size: 0.95rem;"><span class="section-icon">&#128203;</span> Posts (<span id="bulkCount">0</span>)</h4>
+      <h4 class="section-title" style="font-size: 0.95rem;"><span class="section-icon">&#128203;</span> Posts (<span id="bulkCount">0</span>) — <span id="bulkCaptionStatus" style="color:var(--text-muted,#888);font-size:0.8rem;">0 copys gerados</span></h4>
       <div id="bulkPostsList" style="max-height:600px;overflow-y:auto;"><div style="padding:24px;text-align:center;color:var(--text-muted,#888);font-size:0.85rem;">Adicione midias para ver os posts aqui</div></div>
     </div>
   </div>
@@ -92,14 +93,39 @@ document.addEventListener("DOMContentLoaded", function() {
 function addBulkFiles(fileList) {
   for (var i = 0; i < fileList.length; i++) { bulkFiles.push(fileList[i]); bulkCaptions.push(""); }
   renderBulkList();
-  document.getElementById("btnGenerateCaptions").disabled = bulkFiles.length === 0;
-  document.getElementById("btnScheduleAll").disabled = bulkFiles.length === 0;
+  updateBulkButtons();
+}
+
+function updateBulkButtons() {
+  var hasFiles = bulkFiles.length > 0;
+  document.getElementById("btnGenerateMissing").disabled = !hasFiles;
+  document.getElementById("btnGenerateAll").disabled = !hasFiles;
+  document.getElementById("btnScheduleAll").disabled = !hasFiles;
+  updateCaptionStatus();
+}
+
+function updateCaptionStatus() {
+  var generated = bulkCaptions.filter(function(c) { return c && c.trim().length > 0; }).length;
+  var total = bulkFiles.length;
+  var el = document.getElementById("bulkCaptionStatus");
+  if (el) {
+    if (generated === total && total > 0) {
+      el.textContent = "✅ " + generated + "/" + total + " copys prontos";
+      el.style.color = "var(--success, #22c55e)";
+    } else if (generated > 0) {
+      el.textContent = "⚠️ " + generated + "/" + total + " copys gerados";
+      el.style.color = "var(--warning, #f59e0b)";
+    } else {
+      el.textContent = "0 copys gerados";
+      el.style.color = "var(--text-muted, #888)";
+    }
+  }
 }
 
 function renderBulkList() {
   var container = document.getElementById("bulkPostsList");
   document.getElementById("bulkCount").textContent = bulkFiles.length;
-  if (bulkFiles.length === 0) { container.innerHTML = "<div style='padding:24px;text-align:center;color:#888;'>Adicione midias</div>"; return; }
+  if (bulkFiles.length === 0) { container.innerHTML = "<div style='padding:24px;text-align:center;color:#888;'>Adicione midias</div>"; updateCaptionStatus(); return; }
   var startDate = document.getElementById("bulkStartDate").value || new Date().toISOString().split("T")[0];
   var interval = parseInt(document.getElementById("bulkInterval").value) || 3;
   var hour = document.getElementById("bulkHour").value || "10:00";
@@ -110,22 +136,52 @@ function renderBulkList() {
     postDate.setDate(postDate.getDate() + (i * interval));
     var dateStr = postDate.toLocaleDateString("pt-BR") + " " + hour;
     var isVideo = file.type.startsWith("video/");
-    html += "<div style='padding:12px;border-bottom:1px solid var(--border-color,#333);display:flex;gap:12px;align-items:start;'>";
+    var hasCaption = bulkCaptions[i] && bulkCaptions[i].trim().length > 0;
+    var borderColor = hasCaption ? "var(--success, #22c55e)" : "var(--border-color, #333)";
+    var borderStyle = hasCaption ? "solid" : "dashed";
+
+    html += "<div id='bulkItem" + i + "' style='padding:12px;border-bottom:2px " + borderStyle + " " + borderColor + ";display:flex;gap:12px;align-items:start;transition:all 0.3s;'>";
+
+    // Thumbnail
     html += "<div style='flex:0 0 60px;height:60px;border-radius:8px;overflow:hidden;background:var(--bg-glass,#222);display:flex;align-items:center;justify-content:center;font-size:1.5rem;'>";
     if (!isVideo) { html += "<img src='" + URL.createObjectURL(file) + "' style='width:100%;height:100%;object-fit:cover;'>"; }
     else { html += "&#127909;"; }
     html += "</div><div style='flex:1;min-width:0;'>";
-    html += "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;'>";
+
+    // Header row com data + botões
+    html += "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;'>";
     html += "<strong style='font-size:0.8rem;'>" + (i+1) + ". " + dateStr + "</strong>";
-    html += "<div style='display:flex;gap:4px;'>";
-    if (i > 0) html += "<button class='btn btn-secondary btn-sm' onclick='moveBulkItem(" + i + ",-1)'>&#8593;</button>";
-    if (i < bulkFiles.length - 1) html += "<button class='btn btn-secondary btn-sm' onclick='moveBulkItem(" + i + ",1)'>&#8595;</button>";
-    html += "<button class='btn btn-danger btn-sm' onclick='removeBulkItem(" + i + ")'>&#10005;</button>";
+    html += "<div style='display:flex;gap:4px;align-items:center;'>";
+
+    // Botão gerar/regerar individual
+    var btnLabel = hasCaption ? "🔄" : "✨";
+    var btnTitle = hasCaption ? "Regerar copy" : "Gerar copy com IA";
+    html += "<button class='btn btn-secondary btn-sm' onclick='bulkGenerateSingle(" + i + ")' title='" + btnTitle + "' id='btnGen" + i + "' style='font-size:0.75rem;padding:4px 8px;'>" + btnLabel + "</button>";
+
+    // Move up/down + remove
+    if (i > 0) html += "<button class='btn btn-secondary btn-sm' onclick='moveBulkItem(" + i + ",-1)' style='padding:4px 6px;'>&#8593;</button>";
+    if (i < bulkFiles.length - 1) html += "<button class='btn btn-secondary btn-sm' onclick='moveBulkItem(" + i + ",1)' style='padding:4px 6px;'>&#8595;</button>";
+    html += "<button class='btn btn-danger btn-sm' onclick='removeBulkItem(" + i + ")' style='padding:4px 6px;'>&#10005;</button>";
     html += "</div></div>";
-    html += "<textarea class='form-textarea' style='font-size:0.75rem;min-height:50px;resize:vertical;' placeholder='Copy sera gerado pela IA...' onchange='bulkCaptions[" + i + "]=this.value' id='bulkCaption" + i + "'>" + (bulkCaptions[i] || "") + "</textarea>";
+
+    // Textarea da caption
+    html += "<textarea class='form-textarea' style='font-size:0.75rem;min-height:60px;resize:vertical;' placeholder='Clique ✨ para gerar o copy com IA...' onchange='updateBulkCaption(" + i + ", this.value)' id='bulkCaption" + i + "'>" + (bulkCaptions[i] || "") + "</textarea>";
+
+    // Status indicator
+    if (hasCaption) {
+      var charCount = bulkCaptions[i].length;
+      html += "<div style='font-size:0.65rem;color:var(--text-muted,#888);margin-top:2px;text-align:right;'>" + charCount + " caracteres</div>";
+    }
+
     html += "</div></div>";
   }
   container.innerHTML = html;
+  updateCaptionStatus();
+}
+
+function updateBulkCaption(index, value) {
+  bulkCaptions[index] = value;
+  updateCaptionStatus();
 }
 
 function moveBulkItem(index, direction) {
@@ -139,16 +195,95 @@ function moveBulkItem(index, direction) {
 function removeBulkItem(index) {
   bulkFiles.splice(index, 1); bulkCaptions.splice(index, 1);
   renderBulkList();
-  document.getElementById("btnGenerateCaptions").disabled = bulkFiles.length === 0;
-  document.getElementById("btnScheduleAll").disabled = bulkFiles.length === 0;
+  updateBulkButtons();
 }
 
-async function bulkGenerateCaptions() {
-  if (bulkFiles.length === 0) return;
-  var btn = document.getElementById("btnGenerateCaptions");
-  btn.disabled = true; btn.textContent = "Gerando...";
+// Gerar copy de um único item
+async function bulkGenerateSingle(index) {
+  var btn = document.getElementById("btnGen" + index);
+  var ta = document.getElementById("bulkCaption" + index);
+  if (!btn) return;
+
+  var origText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "⏳";
+  if (ta) ta.placeholder = "Gerando copy com IA...";
+
   var tone = document.getElementById("bulkTone").value;
+  try {
+    var fd = new FormData();
+    fd.append("media", bulkFiles[index]);
+    fd.append("tone", tone);
+    var resp = await fetch("/api/ai/caption", { method: "POST", body: fd });
+    var data = await resp.json();
+    if (data.success && data.caption) {
+      bulkCaptions[index] = data.caption;
+      if (ta) ta.value = data.caption;
+      showToast("Copy #" + (index + 1) + " gerado! ✅", "success");
+      renderBulkList(); // Re-render para atualizar visual
+    } else {
+      showToast("Erro no copy #" + (index + 1) + ": " + (data.error || "Tente novamente"), "error");
+      btn.disabled = false;
+      btn.textContent = origText;
+    }
+  } catch(e) {
+    showToast("Erro de conexão ao gerar copy #" + (index + 1), "error");
+    btn.disabled = false;
+    btn.textContent = origText;
+  }
+}
+
+// Gerar apenas as que estão faltando
+async function bulkGenerateMissing() {
+  if (bulkFiles.length === 0) return;
+  var missing = [];
   for (var i = 0; i < bulkFiles.length; i++) {
+    if (!bulkCaptions[i] || bulkCaptions[i].trim().length === 0) missing.push(i);
+  }
+  if (missing.length === 0) { showToast("Todos os copys já foram gerados! ✅", "info"); return; }
+
+  var btn = document.getElementById("btnGenerateMissing");
+  btn.disabled = true;
+  btn.textContent = "⏳ Gerando 0/" + missing.length + "...";
+
+  var tone = document.getElementById("bulkTone").value;
+  var done = 0;
+  for (var j = 0; j < missing.length; j++) {
+    var idx = missing[j];
+    try {
+      var fd = new FormData();
+      fd.append("media", bulkFiles[idx]);
+      fd.append("tone", tone);
+      var resp = await fetch("/api/ai/caption", { method: "POST", body: fd });
+      var data = await resp.json();
+      if (data.success && data.caption) {
+        bulkCaptions[idx] = data.caption;
+        var ta = document.getElementById("bulkCaption" + idx);
+        if (ta) ta.value = data.caption;
+        done++;
+      }
+    } catch(e) { console.error(e); }
+    btn.textContent = "⏳ Gerando " + (j + 1) + "/" + missing.length + "...";
+  }
+
+  btn.disabled = false;
+  btn.textContent = "✨ Gerar Faltantes";
+  renderBulkList();
+  showToast(done + " de " + missing.length + " copys gerados!", done === missing.length ? "success" : "warning");
+}
+
+// Regerar TODOS (inclusive os que já têm)
+async function bulkGenerateAll() {
+  if (bulkFiles.length === 0) return;
+  if (!confirm("Isso vai substituir TODOS os copys existentes. Continuar?")) return;
+
+  var btn = document.getElementById("btnGenerateAll");
+  btn.disabled = true;
+
+  var tone = document.getElementById("bulkTone").value;
+  var done = 0;
+  for (var i = 0; i < bulkFiles.length; i++) {
+    btn.textContent = "⏳ " + (i + 1) + "/" + bulkFiles.length + "...";
     try {
       var fd = new FormData();
       fd.append("media", bulkFiles[i]);
@@ -159,11 +294,15 @@ async function bulkGenerateCaptions() {
         bulkCaptions[i] = data.caption;
         var ta = document.getElementById("bulkCaption" + i);
         if (ta) ta.value = data.caption;
+        done++;
       }
     } catch(e) { console.error(e); }
   }
-  btn.disabled = false; btn.textContent = "Gerar Copys com IA";
-  showToast("Copys gerados para " + bulkFiles.length + " posts!", "success");
+
+  btn.disabled = false;
+  btn.textContent = "🔄 Regerar Todos";
+  renderBulkList();
+  showToast(done + " de " + bulkFiles.length + " copys gerados!", done === bulkFiles.length ? "success" : "warning");
 }
 
 async function bulkScheduleAll() {
@@ -174,7 +313,7 @@ async function bulkScheduleAll() {
     if (ta) bulkCaptions[i] = ta.value;
   }
   var btn = document.getElementById("btnScheduleAll");
-  btn.disabled = true; btn.textContent = "Agendando...";
+  btn.disabled = true; btn.textContent = "⏳ Agendando...";
   var fd = new FormData();
   fd.append("profile_id", profileId);
   fd.append("start_date", document.getElementById("bulkStartDate").value);
@@ -192,7 +331,7 @@ async function bulkScheduleAll() {
     if (data.success) { showToast(data.message, "success"); setTimeout(function() { window.location.href = "/posts"; }, 1500); }
     else { showToast(data.error || "Erro ao agendar.", "error"); }
   } catch(e) { showToast("Erro de conexao.", "error"); }
-  btn.disabled = false; btn.textContent = "Agendar Todos";
+  btn.disabled = false; btn.textContent = "📅 Agendar Todos";
 }
 
 document.getElementById("bulkStartDate").addEventListener("change", renderBulkList);

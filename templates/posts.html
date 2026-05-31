@@ -8,16 +8,16 @@
 <div class="flex-between mb-3" style="flex-wrap: wrap; gap: 12px;">
   <div class="filter-tabs" id="filterTabs">
     <button class="filter-tab active" data-filter="all" onclick="filterPosts('all', this)">
-      Todos
+      Todos <span id="countAll" class="filter-count"></span>
     </button>
     <button class="filter-tab" data-filter="pending" onclick="filterPosts('pending', this)">
-      ⏳ Agendados
+      ⏳ Agendados <span id="countPending" class="filter-count"></span>
     </button>
     <button class="filter-tab" data-filter="published" onclick="filterPosts('published', this)">
-      ✅ Publicados
+      ✅ Publicados <span id="countPublished" class="filter-count"></span>
     </button>
     <button class="filter-tab" data-filter="failed" onclick="filterPosts('failed', this)">
-      ❌ Falhas
+      ❌ Falhas <span id="countFailed" class="filter-count"></span>
     </button>
   </div>
 
@@ -30,50 +30,60 @@
 {% if posts and posts|length > 0 %}
 <div class="posts-grid stagger" id="postsGrid">
   {% for post in posts %}
-  <div class="post-card" data-status="{{ post.status }}" data-id="{{ post.id }}">
+  <div class="post-card" data-status="{{ post.status }}" data-id="{{ post.id }}" style="border-left: 3px solid {% if post.status == 'published' %}var(--success, #22c55e){% elif post.status == 'pending' %}var(--warning, #f59e0b){% elif post.status == 'failed' %}var(--danger, #ef4444){% else %}var(--primary){% endif %};">
     <!-- Media Thumbnail -->
     <div class="post-card-media">
       {% if post.media_path %}
-      <img src="{{ url_for('static', filename='uploads/' + post.media_path) }}" alt="Post media" loading="lazy">
+      <img src="/uploads/{{ post.media_path.split('uploads/')[-1] if 'uploads/' in post.media_path else post.media_path }}" alt="Post media" loading="lazy"
+           onerror="this.style.display='none'; this.parentElement.innerHTML='<div style=\'height:100%;display:flex;align-items:center;justify-content:center;background:var(--bg-glass);font-size:2.5rem;\'>{% if post.post_type == \"reel\" %}🎬{% elif post.post_type == \"carousel\" %}🖼️{% elif post.post_type == \"story\" %}📱{% else %}📷{% endif %}</div>';">
       {% else %}
       <div class="flex-center" style="height: 100%; color: var(--text-muted); font-size: 3rem; background: var(--bg-glass);">
         {% if post.post_type == 'reel' %}🎬
-        {% elif post.post_type == 'carrossel' %}🖼️
+        {% elif post.post_type == 'carousel' %}🖼️
         {% elif post.post_type == 'story' %}📱
         {% else %}📷{% endif %}
       </div>
       {% endif %}
 
-      <!-- Type & Status overlay -->
+      <!-- Type overlay -->
       <div class="media-overlay">
-        {% if post.post_type == 'foto' %}
-          <span class="badge badge-type foto">📷 Foto</span>
-        {% elif post.post_type == 'reel' %}
-          <span class="badge badge-type reel">🎬 Reel</span>
-        {% elif post.post_type == 'carrossel' %}
-          <span class="badge badge-type carrossel">🖼️ Carrossel</span>
-        {% elif post.post_type == 'story' %}
-          <span class="badge badge-type story">📱 Story</span>
-        {% endif %}
+        <span class="badge badge-type">
+          {% if post.post_type == 'photo' %}📷 Foto
+          {% elif post.post_type == 'reel' %}🎬 Reel
+          {% elif post.post_type == 'carousel' %}🖼️ Carrossel
+          {% elif post.post_type == 'story' %}📱 Story
+          {% else %}{{ post.post_type }}{% endif %}
+        </span>
       </div>
     </div>
 
     <!-- Card Body -->
     <div class="post-card-body">
-      <!-- Caption -->
-      <p class="post-card-caption">
-        {{ post.caption or 'Sem legenda' }}
+      <!-- Schedule Info -->
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <div style="font-size:0.75rem;color:var(--text-muted);">
+          📅 <strong style="color:var(--text-primary,#fff);">{{ post.scheduled_at[:10] if post.scheduled_at else '—' }}</strong>
+          🕐 <strong style="color:var(--text-primary,#fff);">{{ post.scheduled_at[11:16] if post.scheduled_at and post.scheduled_at|length > 11 else '—' }}</strong>
+        </div>
+        <span class="post-countdown" data-date="{{ post.scheduled_at }}" data-status="{{ post.status }}" style="font-size:0.65rem;padding:2px 6px;border-radius:4px;background:var(--bg-glass);color:var(--text-muted);"></span>
+      </div>
+
+      <!-- Caption preview -->
+      <p class="post-card-caption" style="font-size:0.78rem;line-height:1.4;max-height:60px;overflow:hidden;cursor:pointer;" onclick="this.style.maxHeight=this.style.maxHeight==='none'?'60px':'none'" title="Clique para expandir">
+        {{ post.caption[:150] if post.caption else 'Sem legenda' }}{% if post.caption and post.caption|length > 150 %}...{% endif %}
       </p>
 
       <!-- Meta -->
-      <div class="post-card-meta">
-        <div class="post-card-profile">
-          👤 {{ post.profile_name or 'Perfil' }}
+      <div class="post-card-meta" style="margin-bottom:8px;">
+        <div class="post-card-profile" style="font-size:0.72rem;">
+          👤 {{ post.profile_name or 'Perfil' }}{% if post.instagram_username %} <span style="color:var(--text-muted);">@{{ post.instagram_username }}</span>{% endif %}
         </div>
-        <span>{{ post.scheduled_time or '—' }}</span>
+        {% if post.caption %}
+        <span style="font-size:0.65rem;color:var(--text-muted);">{{ post.caption|length }} chars</span>
+        {% endif %}
       </div>
 
-      <!-- Status Badge -->
+      <!-- Status + Actions -->
       <div class="flex-between">
         {% if post.status == 'pending' %}
           <span class="badge badge-pending"><span class="badge-dot"></span> Agendado</span>
@@ -82,28 +92,36 @@
         {% elif post.status == 'published' %}
           <span class="badge badge-published"><span class="badge-dot"></span> Publicado</span>
         {% elif post.status == 'failed' %}
-          <span class="badge badge-failed"><span class="badge-dot"></span> Falhou</span>
+          <span class="badge badge-failed" title="{{ post.error or '' }}"><span class="badge-dot"></span> Falhou</span>
         {% endif %}
 
-        <!-- Actions -->
         <div class="post-card-actions">
-          <button class="btn btn-secondary btn-icon btn-sm" onclick="viewPost('{{ post.id }}')" title="Ver detalhes">
-            👁️
-          </button>
           {% if post.status == 'pending' %}
+          <button class="btn btn-secondary btn-icon btn-sm" onclick="editPost('{{ post.id }}')" title="Editar post">
+            ✏️
+          </button>
           <button class="btn btn-success btn-icon btn-sm" onclick="publishNow('{{ post.id }}')" title="Publicar agora">
             ▶
           </button>
-          <button class="btn btn-danger btn-icon btn-sm" onclick="confirmDeletePost('{{ post.id }}')" title="Cancelar post">
-            🗑️
+          {% endif %}
+          {% if post.status == 'failed' %}
+          <button class="btn btn-secondary btn-icon btn-sm" onclick="editPost('{{ post.id }}')" title="Editar e reagendar">
+            ✏️
           </button>
-          {% elif post.status == 'failed' %}
+          {% endif %}
+          {% if post.status in ['pending', 'failed'] %}
           <button class="btn btn-danger btn-icon btn-sm" onclick="confirmDeletePost('{{ post.id }}')" title="Remover">
             🗑️
           </button>
           {% endif %}
         </div>
       </div>
+
+      {% if post.status == 'failed' and post.error %}
+      <div style="margin-top:6px;padding:6px 8px;background:rgba(239,68,68,0.1);border-radius:6px;font-size:0.65rem;color:var(--danger,#ef4444);word-break:break-word;">
+        ⚠️ {{ post.error[:120] }}
+      </div>
+      {% endif %}
     </div>
   </div>
   {% endfor %}
@@ -123,13 +141,243 @@
   </div>
 </div>
 {% endif %}
+
+<!-- Edit Post Modal -->
+<div class="modal-overlay" id="editPostModal" style="display:none;">
+  <div class="modal" style="max-width:600px;width:95%;">
+    <div class="modal-header">
+      <h3 class="modal-title">✏️ Editar Post #<span id="editPostId"></span></h3>
+      <button class="modal-close" onclick="closeEditModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <!-- Preview image -->
+      <div style="margin-bottom:16px;border-radius:10px;overflow:hidden;max-height:200px;">
+        <img id="editPostImage" src="" style="width:100%;object-fit:cover;" onerror="this.style.display='none'">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">📅 Data e Hora Agendada</label>
+        <input type="datetime-local" class="form-input" id="editPostDate">
+      </div>
+
+      <div class="form-group">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <label class="form-label">📝 Caption</label>
+          <button class="btn btn-secondary btn-sm" onclick="regenerateCaption()" id="btnRegenCaption" style="font-size:0.7rem;">
+            🔄 Regerar com IA
+          </button>
+        </div>
+        <textarea class="form-textarea" id="editPostCaption" rows="8" style="font-size:0.8rem;min-height:150px;"></textarea>
+        <div style="text-align:right;font-size:0.65rem;color:var(--text-muted);margin-top:2px;">
+          <span id="editCaptionCount">0</span> caracteres
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">📋 Tipo de Post</label>
+        <select class="form-select" id="editPostType" disabled>
+          <option value="photo">📷 Foto</option>
+          <option value="reel">🎬 Reel</option>
+          <option value="carousel">🖼️ Carrossel</option>
+          <option value="story">📱 Story</option>
+        </select>
+      </div>
+
+      <!-- Logs -->
+      <div id="editPostLogs" style="margin-top:12px;"></div>
+    </div>
+    <div class="modal-footer" style="display:flex;gap:8px;justify-content:flex-end;padding:16px 24px;border-top:1px solid var(--border-color,#333);">
+      <button class="btn btn-secondary" onclick="closeEditModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="savePostEdit()" id="btnSavePost">💾 Salvar Alterações</button>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-  // Initialize posts page
-  document.addEventListener('DOMContentLoaded', () => {
-    initPostsPage();
+document.addEventListener('DOMContentLoaded', () => {
+  initPostsPage();
+  updateCountdowns();
+  setInterval(updateCountdowns, 60000); // Atualiza countdown a cada minuto
+  updateFilterCounts();
+});
+
+function initPostsPage() {
+  // Caption character counter in edit modal
+  var ta = document.getElementById('editPostCaption');
+  if (ta) {
+    ta.addEventListener('input', function() {
+      document.getElementById('editCaptionCount').textContent = this.value.length;
+    });
+  }
+}
+
+function updateFilterCounts() {
+  var all = document.querySelectorAll('.post-card').length;
+  var pending = document.querySelectorAll('.post-card[data-status="pending"]').length;
+  var published = document.querySelectorAll('.post-card[data-status="published"]').length;
+  var failed = document.querySelectorAll('.post-card[data-status="failed"]').length;
+  var el;
+  el = document.getElementById('countAll'); if (el) el.textContent = '(' + all + ')';
+  el = document.getElementById('countPending'); if (el) el.textContent = '(' + pending + ')';
+  el = document.getElementById('countPublished'); if (el) el.textContent = '(' + published + ')';
+  el = document.getElementById('countFailed'); if (el) el.textContent = '(' + failed + ')';
+}
+
+function updateCountdowns() {
+  document.querySelectorAll('.post-countdown').forEach(function(el) {
+    var dateStr = el.dataset.date;
+    var status = el.dataset.status;
+    if (status !== 'pending' || !dateStr) {
+      if (status === 'published') el.textContent = '✅ Publicado';
+      else if (status === 'failed') el.textContent = '❌ Falhou';
+      else el.textContent = '';
+      return;
+    }
+    var target = new Date(dateStr);
+    var now = new Date();
+    var diff = target - now;
+    if (diff <= 0) {
+      el.textContent = '⏰ Agora!';
+      el.style.background = 'rgba(239,68,68,0.2)';
+      el.style.color = '#ef4444';
+      return;
+    }
+    var days = Math.floor(diff / 86400000);
+    var hours = Math.floor((diff % 86400000) / 3600000);
+    var mins = Math.floor((diff % 3600000) / 60000);
+    if (days > 0) el.textContent = '⏳ em ' + days + 'd ' + hours + 'h';
+    else if (hours > 0) el.textContent = '⏳ em ' + hours + 'h ' + mins + 'min';
+    else el.textContent = '⏳ em ' + mins + 'min';
   });
+}
+
+var currentEditPostId = null;
+var currentEditMediaPath = null;
+
+async function editPost(postId) {
+  currentEditPostId = postId;
+  document.getElementById('editPostId').textContent = postId;
+
+  try {
+    var resp = await fetch('/api/posts/' + postId);
+    var data = await resp.json();
+    if (!data.success) { showToast(data.error || 'Erro', 'error'); return; }
+
+    var post = data.post;
+    currentEditMediaPath = post.media_path;
+
+    // Preenche campos
+    var img = document.getElementById('editPostImage');
+    if (post.media_path) {
+      var imgPath = post.media_path;
+      if (imgPath.indexOf('uploads/') !== -1) imgPath = imgPath.split('uploads/').pop();
+      img.src = '/uploads/' + imgPath;
+      img.style.display = 'block';
+    } else {
+      img.style.display = 'none';
+    }
+
+    // Date
+    if (post.scheduled_at) {
+      document.getElementById('editPostDate').value = post.scheduled_at.substring(0, 16);
+    }
+
+    // Caption
+    document.getElementById('editPostCaption').value = post.caption || '';
+    document.getElementById('editCaptionCount').textContent = (post.caption || '').length;
+
+    // Type
+    document.getElementById('editPostType').value = post.post_type;
+
+    // Logs
+    var logsHtml = '';
+    if (data.logs && data.logs.length > 0) {
+      logsHtml = '<details style="font-size:0.72rem;"><summary style="cursor:pointer;color:var(--text-muted);margin-bottom:6px;">📋 Histórico (' + data.logs.length + ')</summary>';
+      data.logs.forEach(function(log) {
+        var date = log.created_at ? log.created_at.substring(0, 16).replace('T', ' ') : '';
+        logsHtml += '<div style="padding:4px 0;border-bottom:1px solid var(--border-color,#333);">';
+        logsHtml += '<span style="color:var(--text-muted);">' + date + '</span> ';
+        logsHtml += '<strong>' + log.action + '</strong> ';
+        logsHtml += '<span style="color:var(--text-muted);">' + (log.details || '') + '</span>';
+        logsHtml += '</div>';
+      });
+      logsHtml += '</details>';
+    }
+    document.getElementById('editPostLogs').innerHTML = logsHtml;
+
+    // Show modal
+    document.getElementById('editPostModal').style.display = 'flex';
+  } catch(e) {
+    showToast('Erro ao carregar post: ' + e.message, 'error');
+  }
+}
+
+function closeEditModal() {
+  document.getElementById('editPostModal').style.display = 'none';
+  currentEditPostId = null;
+}
+
+async function savePostEdit() {
+  if (!currentEditPostId) return;
+  var btn = document.getElementById('btnSavePost');
+  btn.disabled = true; btn.textContent = '⏳ Salvando...';
+
+  var caption = document.getElementById('editPostCaption').value;
+  var scheduledAt = document.getElementById('editPostDate').value;
+
+  try {
+    var resp = await fetch('/api/posts/' + currentEditPostId, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ caption: caption, scheduled_at: scheduledAt })
+    });
+    var data = await resp.json();
+    if (data.success) {
+      showToast('Post atualizado! ✅', 'success');
+      closeEditModal();
+      setTimeout(function() { location.reload(); }, 800);
+    } else {
+      showToast(data.error || 'Erro ao salvar', 'error');
+    }
+  } catch(e) {
+    showToast('Erro de conexão', 'error');
+  }
+  btn.disabled = false; btn.textContent = '💾 Salvar Alterações';
+}
+
+async function regenerateCaption() {
+  if (!currentEditMediaPath) { showToast('Sem mídia para gerar caption', 'warning'); return; }
+  var btn = document.getElementById('btnRegenCaption');
+  btn.disabled = true; btn.textContent = '⏳ Gerando...';
+
+  try {
+    var fd = new FormData();
+    // Fetch the image from server and re-upload for AI
+    var imgResp = await fetch(document.getElementById('editPostImage').src);
+    var blob = await imgResp.blob();
+    fd.append('media', blob, 'image.jpg');
+    fd.append('tone', 'profissional');
+
+    var resp = await fetch('/api/ai/caption', { method: 'POST', body: fd });
+    var data = await resp.json();
+    if (data.success && data.caption) {
+      document.getElementById('editPostCaption').value = data.caption;
+      document.getElementById('editCaptionCount').textContent = data.caption.length;
+      showToast('Caption regenerada! ✅', 'success');
+    } else {
+      showToast(data.error || 'Erro ao gerar caption', 'error');
+    }
+  } catch(e) {
+    showToast('Erro: ' + e.message, 'error');
+  }
+  btn.disabled = false; btn.textContent = '🔄 Regerar com IA';
+}
+
+// Close modal on overlay click
+document.getElementById('editPostModal').addEventListener('click', function(e) {
+  if (e.target === this) closeEditModal();
+});
 </script>
 {% endblock %}

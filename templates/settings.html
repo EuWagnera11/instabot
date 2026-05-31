@@ -64,10 +64,55 @@
 {% endblock %}
 
 {% block scripts %}
+<!-- Login Modal -->
+<div class="modal-overlay" id="loginModal">
+  <div class="modal" style="max-width: 440px;">
+    <div class="modal-header">
+      <h3 id="loginModalTitle">🌐 Login via Navegador</h3>
+      <button class="btn-icon btn-secondary" onclick="closeLoginModal()">✕</button>
+    </div>
+    <div class="modal-body" style="text-align: center; padding: 32px 24px;">
+      <div id="loginSpinner" style="margin-bottom: 20px;">
+        <div style="
+          width: 56px; height: 56px; margin: 0 auto;
+          border: 4px solid var(--border-color, #333);
+          border-top-color: var(--primary, #8b5cf6);
+          border-radius: 50%;
+          animation: spin 0.8s linear infinite;
+        "></div>
+      </div>
+      <div id="loginStatusIcon" style="display:none; font-size: 3rem; margin-bottom: 16px;"></div>
+      <p id="loginStatusMsg" style="
+        font-size: 1rem; color: var(--text-secondary, #ccc);
+        margin: 0 0 8px 0; line-height: 1.5;
+      ">Abrindo Chrome...</p>
+      <p id="loginStatusHint" style="
+        font-size: 0.8rem; color: var(--text-muted, #888);
+        margin: 0;
+      ">Uma janela do Chrome vai abrir. Faça login no Instagram normalmente.</p>
+    </div>
+    <div class="modal-footer" id="loginModalFooter">
+      <button class="btn btn-secondary" onclick="closeLoginModal()">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<style>
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+  #loginSpinner div {
+    transition: border-color 0.3s;
+  }
+</style>
+
 <script>
 document.addEventListener("DOMContentLoaded", function() {
   loadSettingsPage();
 });
+
+var _loginPollTimer = null;
+var _loginProfileId = null;
 
 function loadSettingsPage() {
   apiGet("/api/settings").then(function(data) {
@@ -97,15 +142,36 @@ function loadProfilesList() {
     }
     var html = "";
     data.profiles.forEach(function(p) {
-      var dotClass = p.login_status === "logged_in" ? "online" : "offline";
+      var isLogged = p.login_status === "logged_in";
+      var dotClass = isLogged ? "online" : "offline";
       var username = p.instagram_username ? " <span style=\"color:var(--text-muted,#888)\">@" + p.instagram_username + "</span>" : "";
+
+      var statusLabel = p.login_status || "unknown";
+      var statusMap = {
+        "logged_in": "✅ Conectado",
+        "logged_out": "⬚ Desconectado",
+        "failed": "❌ Falhou",
+        "expired": "⏰ Expirado",
+        "browser_login": "🌐 Aguardando login...",
+        "2fa_pending": "🔐 Aguardando 2FA",
+        "checkpoint": "⚠️ Checkpoint",
+        "unknown": "❓ Desconhecido"
+      };
+      var statusText = statusMap[statusLabel] || statusLabel;
+
       html += "<div style=\"display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--border-color,#333);\">";
       html += "<div style=\"display:flex;align-items:center;gap:12px;\"><span class=\"status-dot " + dotClass + "\"></span><div><strong>" + p.name + "</strong>" + username;
-      html += "<div style=\"font-size:0.75rem;color:var(--text-muted,#888);\">Status: " + (p.login_status || "unknown") + "</div></div></div>";
+      html += "<div style=\"font-size:0.75rem;color:var(--text-muted,#888);margin-top:2px;\">" + statusText + "</div></div></div>";
       html += "<div style=\"display:flex;gap:6px;\">";
-      html += "<button class=\"btn btn-primary btn-sm\" onclick=\"loginProfile(" + p.id + ")\">Login</button>";
-      html += "<button class=\"btn btn-secondary btn-sm\" onclick=\"checkProfileLogin(" + p.id + ")\">Verificar</button>";
-      html += "<button class=\"btn btn-danger btn-sm\" onclick=\"deleteProfile(" + p.id + ")\">Remover</button>";
+
+      if (isLogged) {
+        html += "<button class=\"btn btn-secondary btn-sm\" onclick=\"checkProfileLogin(" + p.id + ")\">Verificar</button>";
+        html += "<button class=\"btn btn-danger btn-sm\" onclick=\"logoutProfile(" + p.id + ")\">Sair</button>";
+      } else {
+        html += "<button class=\"btn btn-primary btn-sm\" onclick=\"loginProfile(" + p.id + ")\">🌐 Login</button>";
+      }
+
+      html += "<button class=\"btn btn-danger btn-sm\" onclick=\"deleteProfile(" + p.id + ")\" title=\"Remover conta\">🗑️</button>";
       html += "</div></div>";
     });
     container.innerHTML = html;
@@ -128,31 +194,102 @@ document.getElementById("addProfileForm").addEventListener("submit", function(e)
 });
 
 function loginProfile(id) {
-  var username = prompt("Username do Instagram (sem @):");
-  if (!username) return;
-  var password = prompt("Senha do Instagram:");
-  if (!password) return;
+  _loginProfileId = id;
 
-  apiPost("/api/profiles/" + id + "/login", { username: username, password: password }).then(function(data) {
-    if (data.success) {
-      showToast("Login realizado com sucesso!", "success");
-      loadProfilesList();
-    } else if (data.requires_2fa) {
-      var code = prompt("Digite o código 2FA (6 dígitos):");
-      if (!code) return;
-      apiPost("/api/profiles/" + id + "/login/2fa", { code: code }).then(function(data2) {
-        if (data2.success) {
-          showToast("Login com 2FA realizado!", "success");
-        } else {
-          showToast(data2.error || "Código inválido.", "error");
+  // Reseta o modal para estado de espera
+  document.getElementById("loginSpinner").style.display = "block";
+  document.getElementById("loginStatusIcon").style.display = "none";
+  document.getElementById("loginStatusMsg").textContent = "Abrindo Chrome...";
+  document.getElementById("loginStatusHint").textContent = "Uma janela do Chrome vai abrir. Faça login no Instagram normalmente.";
+  document.getElementById("loginModalFooter").innerHTML = '<button class="btn btn-secondary" onclick="closeLoginModal()">Cancelar</button>';
+
+  // Abre o modal
+  openModal("loginModal");
+
+  // Chama a API para abrir o browser
+  fetch("/api/profiles/" + id + "/login/browser", { method: "POST" })
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+      if (data.error) {
+        setLoginModalError(data.error);
+        return;
+      }
+      document.getElementById("loginStatusMsg").textContent = "Chrome aberto! Faça login no Instagram.";
+      document.getElementById("loginStatusHint").textContent = "Após fazer login, esta janela será atualizada automaticamente. Tempo limite: 5 minutos.";
+      // Inicia polling
+      startLoginPoll(id);
+    })
+    .catch(function(err) {
+      setLoginModalError("Erro ao abrir navegador: " + err.message);
+    });
+}
+
+function startLoginPoll(profileId) {
+  if (_loginPollTimer) clearInterval(_loginPollTimer);
+
+  _loginPollTimer = setInterval(function() {
+    fetch("/api/profiles/" + profileId + "/login/browser/status")
+      .then(function(res) { return res.json(); })
+      .then(function(data) {
+        if (data.status === "success") {
+          clearInterval(_loginPollTimer);
+          _loginPollTimer = null;
+          setLoginModalSuccess("Login realizado com sucesso! 🎉");
+          loadProfilesList();
+          checkConnection();
+        } else if (data.status === "failed" || data.status === "error") {
+          clearInterval(_loginPollTimer);
+          _loginPollTimer = null;
+          setLoginModalError(data.message || "Login falhou.");
+          loadProfilesList();
         }
-        loadProfilesList();
+        // Se ainda está "waiting", continua o polling
+      })
+      .catch(function() {
+        // Silently ignore polling errors
       });
-    } else {
-      showToast(data.error || data.message || "Erro no login.", "error");
-    }
-  }).catch(function(err) {
-    showToast("Erro no login: " + (err.message || err), "error");
+  }, 2000);
+}
+
+function setLoginModalSuccess(msg) {
+  document.getElementById("loginSpinner").style.display = "none";
+  var icon = document.getElementById("loginStatusIcon");
+  icon.style.display = "block";
+  icon.textContent = "✅";
+  document.getElementById("loginStatusMsg").textContent = msg;
+  document.getElementById("loginStatusMsg").style.color = "var(--success, #22c55e)";
+  document.getElementById("loginStatusHint").textContent = "";
+  document.getElementById("loginModalFooter").innerHTML = '<button class="btn btn-primary" onclick="closeLoginModal()">Fechar</button>';
+}
+
+function setLoginModalError(msg) {
+  document.getElementById("loginSpinner").style.display = "none";
+  var icon = document.getElementById("loginStatusIcon");
+  icon.style.display = "block";
+  icon.textContent = "❌";
+  document.getElementById("loginStatusMsg").textContent = msg;
+  document.getElementById("loginStatusMsg").style.color = "var(--danger, #ef4444)";
+  document.getElementById("loginStatusHint").textContent = "";
+  document.getElementById("loginModalFooter").innerHTML = '<button class="btn btn-secondary" onclick="closeLoginModal()">Fechar</button>';
+}
+
+function closeLoginModal() {
+  if (_loginPollTimer) {
+    clearInterval(_loginPollTimer);
+    _loginPollTimer = null;
+  }
+  closeModal("loginModal");
+  // Reseta as cores
+  document.getElementById("loginStatusMsg").style.color = "";
+  loadProfilesList();
+}
+
+function logoutProfile(id) {
+  if (!confirm("Deseja desconectar esta conta?")) return;
+  apiPost("/api/profiles/" + id + "/logout", {}).then(function() {
+    showToast("Conta desconectada.", "success");
+    loadProfilesList();
+    checkConnection();
   });
 }
 

@@ -1,6 +1,6 @@
 import logging
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 from typing import Any
@@ -74,12 +74,48 @@ class Database:
                 created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (post_id) REFERENCES scheduled_posts(id)
             );
+
+            CREATE TABLE IF NOT EXISTS caption_templates (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                name       TEXT NOT NULL,
+                content    TEXT NOT NULL,
+                tone       TEXT DEFAULT 'descontraido',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS hashtag_groups (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                name       TEXT NOT NULL,
+                hashtags   TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS post_metrics (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                post_id    INTEGER NOT NULL,
+                likes      INTEGER DEFAULT 0,
+                comments   INTEGER DEFAULT 0,
+                reach      INTEGER DEFAULT 0,
+                fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (post_id) REFERENCES scheduled_posts(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS smart_schedule (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                profile_id  INTEGER NOT NULL,
+                day_of_week INTEGER NOT NULL,
+                hour        INTEGER NOT NULL,
+                score       REAL DEFAULT 0,
+                updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (profile_id) REFERENCES profiles(id)
+            );
         """)
         self._migrate()
         self.conn.commit()
         logger.info("Banco de dados inicializado com sucesso.")
 
     def _migrate(self) -> None:
+        # Migration: profiles
         columns = {
             row[1] for row in
             self.conn.execute("PRAGMA table_info(profiles)").fetchall()
@@ -88,6 +124,15 @@ class Database:
             self.conn.execute("ALTER TABLE profiles ADD COLUMN login_status TEXT DEFAULT 'unknown'")
             self.conn.execute("ALTER TABLE profiles ADD COLUMN last_login_check TIMESTAMP")
             logger.info("Migração: adicionadas colunas login_status e last_login_check.")
+
+        # Migration: scheduled_posts.retry_count
+        post_columns = {
+            row[1] for row in
+            self.conn.execute("PRAGMA table_info(scheduled_posts)").fetchall()
+        }
+        if "retry_count" not in post_columns:
+            self.conn.execute("ALTER TABLE scheduled_posts ADD COLUMN retry_count INTEGER DEFAULT 0")
+            logger.info("Migração: adicionada coluna retry_count.")
 
     # ------------------------------------------------------------------
     # Perfis
@@ -163,7 +208,15 @@ class Database:
             SELECT sp.*, p.name AS profile_name, p.instagram_username
             FROM scheduled_posts sp
             JOIN profiles p ON sp.profile_id = p.id
-            ORDER BY sp.scheduled_at DESC
+            ORDER BY
+                CASE sp.status
+                    WHEN 'pending' THEN 0
+                    WHEN 'publishing' THEN 1
+                    WHEN 'failed' THEN 2
+                    WHEN 'published' THEN 3
+                    ELSE 4
+                END,
+                sp.scheduled_at ASC
             """
         ).fetchall()
         return [dict(row) for row in rows]
@@ -294,3 +347,226 @@ class Database:
         return dict(row) if row else {
             "total": 0, "published": 0, "pending": 0, "failed": 0
         }
+
+    def get_stats_by_profile(self, profile_id: int) -> dict:
+        row = self.conn.execute(
+            """
+            SELECT
+                COUNT(*)                                        AS total,
+                SUM(CASE WHEN status = 'published' THEN 1 ELSE 0 END)  AS published,
+                SUM(CASE WHEN status = 'pending'   THEN 1 ELSE 0 END)  AS pending,
+                SUM(CASE WHEN status = 'failed'    THEN 1 ELSE 0 END)  AS failed
+            FROM scheduled_posts WHERE profile_id = ?
+            """,
+            (profile_id,),
+        ).fetchone()
+        return dict(row) if row else {
+            "total": 0, "published": 0, "pending": 0, "failed": 0
+        }
+
+    # ------------------------------------------------------------------
+    # Templates de legenda
+    # ------------------------------------------------------------------
+
+    def add_template(self, name: str, content: str, tone: str = "descontraido") -> int:
+        cursor = self.conn.execute(
+            "INSERT INTO caption_templates (name, content, tone) VALUES (?, ?, ?)",
+            (name, content, tone),
+        )
+        self.conn.commit()
+        return cursor.lastrowid or 0
+
+    def get_templates(self) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM caption_templates ORDER BY name"
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_template(self, template_id: int) -> dict | None:
+        row = self.conn.execute(
+            "SELECT * FROM caption_templates WHERE id = ?", (template_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def update_template(self, template_id: int, **kwargs) -> bool:
+        allowed = {"name", "content", "tone"}
+        fields = {k: v for k, v in kwargs.items() if k in allowed}
+        if not fields:
+            return False
+        set_clause = ", ".join(f"{k} = ?" for k in fields)
+        values = list(fields.values()) + [template_id]
+        cursor = self.conn.execute(
+            f"UPDATE caption_templates SET {set_clause} WHERE id = ?", values
+        )
+        self.conn.commit()
+        return (cursor.rowcount or 0) > 0
+
+    def delete_template(self, template_id: int) -> bool:
+        cursor = self.conn.execute(
+            "DELETE FROM caption_templates WHERE id = ?", (template_id,)
+        )
+        self.conn.commit()
+        return (cursor.rowcount or 0) > 0
+
+    # ------------------------------------------------------------------
+    # Grupos de hashtags
+    # ------------------------------------------------------------------
+
+    def add_hashtag_group(self, name: str, hashtags: str) -> int:
+        cursor = self.conn.execute(
+            "INSERT INTO hashtag_groups (name, hashtags) VALUES (?, ?)",
+            (name, hashtags),
+        )
+        self.conn.commit()
+        return cursor.lastrowid or 0
+
+    def get_hashtag_groups(self) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM hashtag_groups ORDER BY name"
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_hashtag_group(self, group_id: int) -> dict | None:
+        row = self.conn.execute(
+            "SELECT * FROM hashtag_groups WHERE id = ?", (group_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def update_hashtag_group(self, group_id: int, **kwargs) -> bool:
+        allowed = {"name", "hashtags"}
+        fields = {k: v for k, v in kwargs.items() if k in allowed}
+        if not fields:
+            return False
+        set_clause = ", ".join(f"{k} = ?" for k in fields)
+        values = list(fields.values()) + [group_id]
+        cursor = self.conn.execute(
+            f"UPDATE hashtag_groups SET {set_clause} WHERE id = ?", values
+        )
+        self.conn.commit()
+        return (cursor.rowcount or 0) > 0
+
+    def delete_hashtag_group(self, group_id: int) -> bool:
+        cursor = self.conn.execute(
+            "DELETE FROM hashtag_groups WHERE id = ?", (group_id,)
+        )
+        self.conn.commit()
+        return (cursor.rowcount or 0) > 0
+
+    # ------------------------------------------------------------------
+    # Métricas de posts
+    # ------------------------------------------------------------------
+
+    def add_metrics(self, post_id: int, likes: int = 0, comments: int = 0, reach: int = 0) -> int:
+        cursor = self.conn.execute(
+            "INSERT INTO post_metrics (post_id, likes, comments, reach) VALUES (?, ?, ?, ?)",
+            (post_id, likes, comments, reach),
+        )
+        self.conn.commit()
+        return cursor.lastrowid or 0
+
+    def get_metrics(self, post_id: int) -> dict | None:
+        row = self.conn.execute(
+            "SELECT * FROM post_metrics WHERE post_id = ? ORDER BY fetched_at DESC LIMIT 1",
+            (post_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def get_profile_metrics(self, profile_id: int) -> list[dict]:
+        rows = self.conn.execute(
+            """
+            SELECT pm.*, sp.caption, sp.media_path, sp.published_at
+            FROM post_metrics pm
+            JOIN scheduled_posts sp ON pm.post_id = sp.id
+            WHERE sp.profile_id = ?
+            ORDER BY pm.fetched_at DESC
+            """,
+            (profile_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    # ------------------------------------------------------------------
+    # Smart Schedule (horários inteligentes)
+    # ------------------------------------------------------------------
+
+    def update_smart_schedule(self, profile_id: int, day_of_week: int, hour: int, score: float) -> None:
+        existing = self.conn.execute(
+            "SELECT id FROM smart_schedule WHERE profile_id = ? AND day_of_week = ? AND hour = ?",
+            (profile_id, day_of_week, hour),
+        ).fetchone()
+        now = datetime.now(ZoneInfo(Config.SCHEDULER_TIMEZONE)).isoformat()
+        if existing:
+            self.conn.execute(
+                "UPDATE smart_schedule SET score = ?, updated_at = ? WHERE id = ?",
+                (score, now, existing["id"]),
+            )
+        else:
+            self.conn.execute(
+                "INSERT INTO smart_schedule (profile_id, day_of_week, hour, score, updated_at) VALUES (?, ?, ?, ?, ?)",
+                (profile_id, day_of_week, hour, score, now),
+            )
+        self.conn.commit()
+
+    def get_smart_schedule(self, profile_id: int, limit: int = 5) -> list[dict]:
+        rows = self.conn.execute(
+            """
+            SELECT day_of_week, hour, score
+            FROM smart_schedule
+            WHERE profile_id = ?
+            ORDER BY score DESC
+            LIMIT ?
+            """,
+            (profile_id, limit),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    # ------------------------------------------------------------------
+    # Retry
+    # ------------------------------------------------------------------
+
+    def increment_retry(self, post_id: int) -> int:
+        self.conn.execute(
+            "UPDATE scheduled_posts SET retry_count = COALESCE(retry_count, 0) + 1 WHERE id = ?",
+            (post_id,),
+        )
+        self.conn.commit()
+        row = self.conn.execute(
+            "SELECT retry_count FROM scheduled_posts WHERE id = ?", (post_id,)
+        ).fetchone()
+        return row["retry_count"] if row else 0
+
+    # ------------------------------------------------------------------
+    # Calendar
+    # ------------------------------------------------------------------
+
+    def get_posts_by_month(self, year: int, month: int) -> list[dict]:
+        start = f"{year:04d}-{month:02d}-01"
+        if month == 12:
+            end = f"{year + 1:04d}-01-01"
+        else:
+            end = f"{year:04d}-{month + 1:02d}-01"
+        rows = self.conn.execute(
+            """
+            SELECT sp.*, p.name AS profile_name, p.instagram_username
+            FROM scheduled_posts sp
+            JOIN profiles p ON sp.profile_id = p.id
+            WHERE sp.scheduled_at >= ? AND sp.scheduled_at < ?
+            ORDER BY sp.scheduled_at ASC
+            """,
+            (start, end),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    # ------------------------------------------------------------------
+    # Reorder
+    # ------------------------------------------------------------------
+
+    def reorder_posts(self, post_ids: list[int], base_time: str, interval_minutes: int) -> None:
+        """Reordena posts pendentes atribuindo novos horários."""
+        dt = datetime.fromisoformat(base_time)
+        for i, pid in enumerate(post_ids):
+            new_time = dt + timedelta(minutes=interval_minutes * i)
+            self.conn.execute(
+                "UPDATE scheduled_posts SET scheduled_at = ? WHERE id = ? AND status = 'pending'",
+                (new_time.strftime("%Y-%m-%dT%H:%M:%S"), pid),
+            )
+        self.conn.commit()

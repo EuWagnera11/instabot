@@ -21,21 +21,28 @@
     </button>
   </div>
 
-  <a href="/schedule" class="btn btn-primary btn-sm">
-    ➕ Novo Post
-  </a>
+  <div style="display:flex;gap:8px;">
+    <button class="btn btn-secondary btn-sm" onclick="openFeedPreview()">
+      📱 Preview Feed
+    </button>
+    <a href="/schedule" class="btn btn-primary btn-sm">
+      ➕ Novo Post
+    </a>
+  </div>
 </div>
 
 <!-- Posts Grid -->
 {% if posts and posts|length > 0 %}
 <div class="posts-grid stagger" id="postsGrid">
-  {% for post in posts %}
+  {% for post in posts|sort(attribute='scheduled_at') %}
   <div class="post-card" data-status="{{ post.status }}" data-id="{{ post.id }}" style="border-left: 3px solid {% if post.status == 'published' %}var(--success, #22c55e){% elif post.status == 'pending' %}var(--warning, #f59e0b){% elif post.status == 'failed' %}var(--danger, #ef4444){% else %}var(--primary){% endif %};">
     <!-- Media Thumbnail -->
     <div class="post-card-media">
       {% if post.media_path %}
-      <img src="/uploads/{{ post.media_path.split('uploads/')[-1] if 'uploads/' in post.media_path else post.media_path }}" alt="Post media" loading="lazy"
-           onerror="this.style.display='none'; this.parentElement.innerHTML='<div style=\'height:100%;display:flex;align-items:center;justify-content:center;background:var(--bg-glass);font-size:2.5rem;\'>{% if post.post_type == \"reel\" %}🎬{% elif post.post_type == \"carousel\" %}🖼️{% elif post.post_type == \"story\" %}📱{% else %}📷{% endif %}</div>';">
+      {% set media_file = post.media_path.replace('\\', '/').split('uploads/')[-1] %}
+      {% set fallback_emoji = "🎬" if post.post_type == "reel" else "🖼️" if post.post_type == "carousel" else "📱" if post.post_type == "story" else "📷" %}
+      <img src="/uploads/{{ media_file }}" alt="Post media" loading="lazy"
+           onerror="this.style.display='none'; this.parentElement.innerHTML='<div style=&quot;height:100%;display:flex;align-items:center;justify-content:center;background:var(--bg-glass);font-size:2.5rem;&quot;>{{ fallback_emoji }}</div>';">
       {% else %}
       <div class="flex-center" style="height: 100%; color: var(--text-muted); font-size: 3rem; background: var(--bg-glass);">
         {% if post.post_type == 'reel' %}🎬
@@ -141,6 +148,21 @@
   </div>
 </div>
 {% endif %}
+
+<!-- Edit Post Modal -->
+<!-- Feed Preview Modal -->
+<div class="modal-overlay" id="feedPreviewModal" style="display:none;">
+  <div class="modal" style="max-width:500px;width:95%;">
+    <div class="modal-header">
+      <h3 class="modal-title">📱 Preview do Feed</h3>
+      <button class="modal-close" onclick="closeFeedPreview()">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:12px;">Assim ficará o grid do seu perfil (próximos posts + publicados recentes)</p>
+      <div class="feed-preview-grid" id="feedPreviewGrid"></div>
+    </div>
+  </div>
+</div>
 
 <!-- Edit Post Modal -->
 <div class="modal-overlay" id="editPostModal" style="display:none;">
@@ -271,7 +293,7 @@ async function editPost(postId) {
     // Preenche campos
     var img = document.getElementById('editPostImage');
     if (post.media_path) {
-      var imgPath = post.media_path;
+      var imgPath = post.media_path.replace(/\\/g, '/');
       if (imgPath.indexOf('uploads/') !== -1) imgPath = imgPath.split('uploads/').pop();
       img.src = '/uploads/' + imgPath;
       img.style.display = 'block';
@@ -378,6 +400,53 @@ async function regenerateCaption() {
 // Close modal on overlay click
 document.getElementById('editPostModal').addEventListener('click', function(e) {
   if (e.target === this) closeEditModal();
+});
+
+// ──────────────────────────────────────────────
+// Feed Preview
+// ──────────────────────────────────────────────
+
+function openFeedPreview() {
+  var grid = document.getElementById('feedPreviewGrid');
+  grid.innerHTML = '';
+
+  // Collect all posts with images (pending first, then published, max 9)
+  var allCards = document.querySelectorAll('.post-card');
+  var items = [];
+
+  allCards.forEach(function(card) {
+    var img = card.querySelector('.post-card-media img');
+    var status = card.dataset.status;
+    var id = card.dataset.id;
+    if (img && img.src && !img.src.includes('undefined')) {
+      items.push({ id: id, src: img.src, status: status });
+    }
+  });
+
+  // Take first 9
+  var feedItems = items.slice(0, 9);
+
+  if (feedItems.length === 0) {
+    grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--text-muted);">Nenhuma imagem disponível para preview.</div>';
+  } else {
+    feedItems.forEach(function(item, idx) {
+      var div = document.createElement('div');
+      div.className = 'feed-preview-item';
+      div.innerHTML = '<img src="' + item.src + '" onerror="this.parentElement.style.background=\'var(--bg-glass)\'">' +
+        '<span class="feed-order">' + (idx + 1) + '</span>';
+      grid.appendChild(div);
+    });
+  }
+
+  document.getElementById('feedPreviewModal').style.display = 'flex';
+}
+
+function closeFeedPreview() {
+  document.getElementById('feedPreviewModal').style.display = 'none';
+}
+
+document.getElementById('feedPreviewModal').addEventListener('click', function(e) {
+  if (e.target === this) closeFeedPreview();
 });
 </script>
 {% endblock %}

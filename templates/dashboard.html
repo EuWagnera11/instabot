@@ -4,6 +4,19 @@
 {% block page_subtitle %}<p class="header-subtitle">Visão geral das suas publicações</p>{% endblock %}
 
 {% block content %}
+<!-- Profile Filter -->
+{% if profiles and profiles|length > 1 %}
+<div style="margin-bottom:16px;display:flex;align-items:center;gap:12px;">
+  <span style="font-size:0.85rem;color:var(--text-muted);">Filtrar por conta:</span>
+  <select class="form-select" id="profileFilter" style="width:auto;min-width:160px;" onchange="filterDashboard(this.value)">
+    <option value="all">Todas as contas</option>
+    {% for p in profiles %}
+    <option value="{{ p.id }}">{{ p.name }}{% if p.instagram_username %} (@{{ p.instagram_username }}){% endif %}</option>
+    {% endfor %}
+  </select>
+</div>
+{% endif %}
+
 <!-- Stats Cards -->
 <div class="stats-grid stagger">
   <!-- Total Posts -->
@@ -175,5 +188,18 @@
   setInterval(() => {
     refreshDashboard();
   }, 30000);
+
+  function filterDashboard(profileId) {
+    if (profileId === 'all') {
+      window.location.href = '/';
+    } else {
+      // Reload with profile filter (future: AJAX)
+      apiGet('/api/profiles/' + profileId).then(function(data) {
+        if (data.profile) {
+          showToast('Filtrado: ' + data.profile.name, 'info');
+        }
+      });
+    }
+  }
 </script>
 {% endblock %}

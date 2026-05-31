@@ -108,7 +108,10 @@ def _save_upload(file) -> str:
 @app.route("/")
 def index():
     stats = db.get_stats()
-    return render_template("dashboard.html", stats=stats)
+    profiles = db.get_profiles()
+    upcoming_posts = db.get_all_pending_posts()[:5]
+    recent_logs = db.get_recent_logs(10)
+    return render_template("dashboard.html", stats=stats, profiles=profiles, upcoming_posts=upcoming_posts, recent_logs=recent_logs)
 
 
 @app.route("/posts")
@@ -131,6 +134,11 @@ def schedule_page():
 @app.route("/settings")
 def settings_page():
     return render_template("settings.html")
+
+
+@app.route("/calendar")
+def calendar_page():
+    return render_template("calendar.html")
 
 
 # ===========================================================================
@@ -530,6 +538,205 @@ def api_profile_login_browser_status(profile_id: int):
     return jsonify({
         "status": session_info["status"],
         "message": session_info["message"],
+    })
+
+
+# ===========================================================================
+# API — Templates de legenda
+# ===========================================================================
+
+
+@app.route("/api/templates", methods=["GET"])
+def api_get_templates():
+    templates = db.get_templates()
+    return jsonify({"success": True, "templates": templates})
+
+
+@app.route("/api/templates", methods=["POST"])
+def api_create_template():
+    data = request.get_json(silent=True) or {}
+    name = data.get("name", "").strip()
+    content = data.get("content", "").strip()
+    tone = data.get("tone", "descontraido")
+    if not name or not content:
+        return jsonify({"error": "Nome e conteúdo são obrigatórios."}), 400
+    tid = db.add_template(name, content, tone)
+    return jsonify({"success": True, "id": tid})
+
+
+@app.route("/api/templates/<int:template_id>", methods=["PUT"])
+def api_update_template(template_id: int):
+    data = request.get_json(silent=True) or {}
+    updated = db.update_template(template_id, **data)
+    if not updated:
+        return jsonify({"error": "Template não encontrado."}), 404
+    return jsonify({"success": True})
+
+
+@app.route("/api/templates/<int:template_id>", methods=["DELETE"])
+def api_delete_template(template_id: int):
+    deleted = db.delete_template(template_id)
+    if not deleted:
+        return jsonify({"error": "Template não encontrado."}), 404
+    return jsonify({"success": True})
+
+
+# ===========================================================================
+# API — Grupos de hashtags
+# ===========================================================================
+
+
+@app.route("/api/hashtag-groups", methods=["GET"])
+def api_get_hashtag_groups():
+    groups = db.get_hashtag_groups()
+    return jsonify({"success": True, "groups": groups})
+
+
+@app.route("/api/hashtag-groups", methods=["POST"])
+def api_create_hashtag_group():
+    data = request.get_json(silent=True) or {}
+    name = data.get("name", "").strip()
+    hashtags = data.get("hashtags", "").strip()
+    if not name or not hashtags:
+        return jsonify({"error": "Nome e hashtags são obrigatórios."}), 400
+    gid = db.add_hashtag_group(name, hashtags)
+    return jsonify({"success": True, "id": gid})
+
+
+@app.route("/api/hashtag-groups/<int:group_id>", methods=["PUT"])
+def api_update_hashtag_group(group_id: int):
+    data = request.get_json(silent=True) or {}
+    updated = db.update_hashtag_group(group_id, **data)
+    if not updated:
+        return jsonify({"error": "Grupo não encontrado."}), 404
+    return jsonify({"success": True})
+
+
+@app.route("/api/hashtag-groups/<int:group_id>", methods=["DELETE"])
+def api_delete_hashtag_group(group_id: int):
+    deleted = db.delete_hashtag_group(group_id)
+    if not deleted:
+        return jsonify({"error": "Grupo não encontrado."}), 404
+    return jsonify({"success": True})
+
+
+# ===========================================================================
+# API — Smart Schedule (horários inteligentes)
+# ===========================================================================
+
+
+@app.route("/api/profiles/<int:profile_id>/smart-schedule", methods=["GET"])
+def api_smart_schedule(profile_id: int):
+    suggestions = db.get_smart_schedule(profile_id)
+    day_names = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
+    result = []
+    for s in suggestions:
+        result.append({
+            "day_of_week": s["day_of_week"],
+            "day_name": day_names[s["day_of_week"]],
+            "hour": s["hour"],
+            "time": f"{s['hour']:02d}:00",
+            "score": s["score"],
+        })
+    return jsonify({"success": True, "suggestions": result})
+
+
+# ===========================================================================
+# API — Métricas
+# ===========================================================================
+
+
+@app.route("/api/profiles/<int:profile_id>/metrics", methods=["GET"])
+def api_profile_metrics(profile_id: int):
+    metrics = db.get_profile_metrics(profile_id)
+    return jsonify({"success": True, "metrics": metrics})
+
+
+# ===========================================================================
+# API — Reorder posts
+# ===========================================================================
+
+
+@app.route("/api/posts/reorder", methods=["POST"])
+def api_reorder_posts():
+    data = request.get_json(silent=True) or {}
+    post_ids = data.get("post_ids", [])
+    if not post_ids or not isinstance(post_ids, list):
+        return jsonify({"error": "post_ids é obrigatório (lista de IDs)."}), 400
+
+    # Pega o horário do primeiro post como base
+    first_post = db.get_post(post_ids[0])
+    if not first_post:
+        return jsonify({"error": "Post não encontrado."}), 404
+
+    base_time = first_post["scheduled_at"]
+
+    # Calcula intervalo médio entre posts existentes
+    if len(post_ids) > 1:
+        last_post = db.get_post(post_ids[-1])
+        if last_post:
+            from datetime import datetime as dt
+            t1 = dt.fromisoformat(first_post["scheduled_at"])
+            t2 = dt.fromisoformat(last_post["scheduled_at"])
+            total_minutes = int((t2 - t1).total_seconds() / 60)
+            interval = max(total_minutes // (len(post_ids) - 1), 60)
+        else:
+            interval = 5760  # 4 dias default
+    else:
+        interval = 5760
+
+    db.reorder_posts(post_ids, base_time, interval)
+
+    # Reagendar no scheduler
+    for pid in post_ids:
+        scheduler.cancel_post(pid)
+        post = db.get_post(pid)
+        if post and post["status"] == "pending":
+            scheduler.schedule_post(pid, post["scheduled_at"])
+
+    return jsonify({"success": True, "message": f"Posts reordenados ({len(post_ids)} posts)."})
+
+
+# ===========================================================================
+# API — Calendário
+# ===========================================================================
+
+
+@app.route("/api/calendar", methods=["GET"])
+def api_calendar():
+    month_str = request.args.get("month", "")
+    if not month_str:
+        from datetime import datetime as dt
+        now = dt.now()
+        year, month = now.year, now.month
+    else:
+        parts = month_str.split("-")
+        year, month = int(parts[0]), int(parts[1])
+
+    posts = db.get_posts_by_month(year, month)
+
+    # Agrupa por dia
+    days = {}
+    for p in posts:
+        day = p["scheduled_at"][8:10] if p["scheduled_at"] else "00"
+        day_int = int(day)
+        if day_int not in days:
+            days[day_int] = []
+        days[day_int].append({
+            "id": p["id"],
+            "post_type": p["post_type"],
+            "status": p["status"],
+            "time": p["scheduled_at"][11:16] if p["scheduled_at"] and len(p["scheduled_at"]) > 11 else "",
+            "caption": (p["caption"] or "")[:50],
+            "profile_name": p.get("profile_name", ""),
+        })
+
+    return jsonify({
+        "success": True,
+        "year": year,
+        "month": month,
+        "days": days,
+        "total_posts": len(posts),
     })
 
 

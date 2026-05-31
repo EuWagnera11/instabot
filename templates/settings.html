@@ -53,6 +53,38 @@
 </section>
 
 <section class="mb-4">
+  <h3 class="section-title"><span class="section-icon">📝</span> Templates de Legenda</h3>
+  <div class="card">
+    <div id="templatesList" style="margin-bottom:16px;"></div>
+    <form id="addTemplateForm" style="display:flex;flex-direction:column;gap:8px;">
+      <div style="display:flex;gap:8px;">
+        <input type="text" id="templateName" placeholder="Nome do template" class="form-input" style="flex:1;" required>
+        <select id="templateTone" class="form-input" style="width:150px;">
+          <option value="descontraido">Descontraído</option>
+          <option value="profissional">Profissional</option>
+          <option value="engajamento">Engajamento</option>
+          <option value="informativo">Informativo</option>
+        </select>
+      </div>
+      <textarea id="templateContent" placeholder="Conteúdo do template (use {hashtags} para inserir hashtags)" class="form-input" rows="3" required></textarea>
+      <button type="submit" class="btn btn-primary btn-sm" style="align-self:flex-start;">Adicionar Template</button>
+    </form>
+  </div>
+</section>
+
+<section class="mb-4">
+  <h3 class="section-title"><span class="section-icon">#️⃣</span> Grupos de Hashtags</h3>
+  <div class="card">
+    <div id="hashtagGroupsList" style="margin-bottom:16px;"></div>
+    <form id="addHashtagGroupForm" style="display:flex;flex-direction:column;gap:8px;">
+      <input type="text" id="hashtagGroupName" placeholder="Nome do grupo (ex: Fitness, Marketing)" class="form-input" required>
+      <textarea id="hashtagGroupTags" placeholder="#hashtag1 #hashtag2 #hashtag3" class="form-input" rows="2" required></textarea>
+      <button type="submit" class="btn btn-primary btn-sm" style="align-self:flex-start;">Adicionar Grupo</button>
+    </form>
+  </div>
+</section>
+
+<section class="mb-4">
   <h3 class="section-title"><span class="section-icon">🖥️</span> Sistema</h3>
   <div class="card">
     <div style="display: flex; align-items: center; gap: 12px;">
@@ -328,5 +360,98 @@ function scanMedia() {
     showToast(count + " arquivo(s) de mídia encontrado(s).", "info");
   });
 }
+
+// ──────────────────────────────────────────────
+// Templates de Legenda
+// ──────────────────────────────────────────────
+
+function loadTemplates() {
+  var container = document.getElementById("templatesList");
+  apiGet("/api/templates").then(function(data) {
+    if (!data.templates || data.templates.length === 0) {
+      container.innerHTML = "<div style='padding:12px;text-align:center;color:var(--text-muted);font-size:0.85rem;'>Nenhum template criado.</div>";
+      return;
+    }
+    var html = "";
+    data.templates.forEach(function(t) {
+      html += "<div style='display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border-color,#333);'>";
+      html += "<div><strong>" + t.name + "</strong> <span style='font-size:0.7rem;color:var(--text-muted);'>(" + t.tone + ")</span>";
+      html += "<div style='font-size:0.75rem;color:var(--text-muted);max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'>" + (t.content || "").substring(0, 80) + "</div></div>";
+      html += "<button class='btn btn-danger btn-sm btn-icon' onclick='deleteTemplate(" + t.id + ")' title='Remover'>🗑️</button>";
+      html += "</div>";
+    });
+    container.innerHTML = html;
+  });
+}
+
+document.getElementById("addTemplateForm").addEventListener("submit", function(e) {
+  e.preventDefault();
+  var name = document.getElementById("templateName").value.trim();
+  var content = document.getElementById("templateContent").value.trim();
+  var tone = document.getElementById("templateTone").value;
+  if (!name || !content) return;
+  apiPost("/api/templates", { name: name, content: content, tone: tone }).then(function() {
+    showToast("Template criado!", "success");
+    document.getElementById("templateName").value = "";
+    document.getElementById("templateContent").value = "";
+    loadTemplates();
+  });
+});
+
+function deleteTemplate(id) {
+  if (!confirm("Remover este template?")) return;
+  apiDelete("/api/templates/" + id).then(function() {
+    showToast("Template removido.", "success");
+    loadTemplates();
+  });
+}
+
+// ──────────────────────────────────────────────
+// Grupos de Hashtags
+// ──────────────────────────────────────────────
+
+function loadHashtagGroups() {
+  var container = document.getElementById("hashtagGroupsList");
+  apiGet("/api/hashtag-groups").then(function(data) {
+    if (!data.groups || data.groups.length === 0) {
+      container.innerHTML = "<div style='padding:12px;text-align:center;color:var(--text-muted);font-size:0.85rem;'>Nenhum grupo criado.</div>";
+      return;
+    }
+    var html = "";
+    data.groups.forEach(function(g) {
+      html += "<div style='display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border-color,#333);'>";
+      html += "<div><strong>" + g.name + "</strong>";
+      html += "<div style='font-size:0.75rem;color:var(--text-muted);max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'>" + (g.hashtags || "").substring(0, 80) + "</div></div>";
+      html += "<button class='btn btn-danger btn-sm btn-icon' onclick='deleteHashtagGroup(" + g.id + ")' title='Remover'>🗑️</button>";
+      html += "</div>";
+    });
+    container.innerHTML = html;
+  });
+}
+
+document.getElementById("addHashtagGroupForm").addEventListener("submit", function(e) {
+  e.preventDefault();
+  var name = document.getElementById("hashtagGroupName").value.trim();
+  var hashtags = document.getElementById("hashtagGroupTags").value.trim();
+  if (!name || !hashtags) return;
+  apiPost("/api/hashtag-groups", { name: name, hashtags: hashtags }).then(function() {
+    showToast("Grupo de hashtags criado!", "success");
+    document.getElementById("hashtagGroupName").value = "";
+    document.getElementById("hashtagGroupTags").value = "";
+    loadHashtagGroups();
+  });
+});
+
+function deleteHashtagGroup(id) {
+  if (!confirm("Remover este grupo?")) return;
+  apiDelete("/api/hashtag-groups/" + id).then(function() {
+    showToast("Grupo removido.", "success");
+    loadHashtagGroups();
+  });
+}
+
+// Load on page init
+loadTemplates();
+loadHashtagGroups();
 </script>
 {% endblock %}

@@ -820,10 +820,112 @@ function setLoading(btn, loading) {
 
 
 // ──────────────────────────────────────────────
+// Theme Toggle (Dark/Light)
+// ──────────────────────────────────────────────
+
+function toggleTheme() {
+  const body = document.body;
+  const isLight = body.classList.toggle('light-mode');
+  localStorage.setItem('instabot-theme', isLight ? 'light' : 'dark');
+  updateThemeButton(isLight);
+}
+
+function updateThemeButton(isLight) {
+  const icon = document.getElementById('themeIcon');
+  const label = document.getElementById('themeLabel');
+  if (icon) icon.textContent = isLight ? '☀️' : '🌙';
+  if (label) label.textContent = isLight ? 'Light Mode' : 'Dark Mode';
+}
+
+function loadTheme() {
+  const saved = localStorage.getItem('instabot-theme');
+  if (saved === 'light') {
+    document.body.classList.add('light-mode');
+    updateThemeButton(true);
+  }
+}
+
+
+// ──────────────────────────────────────────────
+// Drag & Drop (Posts reorder)
+// ──────────────────────────────────────────────
+
+function initDragDrop() {
+  const grid = document.getElementById('postsGrid');
+  if (!grid) return;
+
+  const cards = grid.querySelectorAll('.post-card[data-status="pending"]');
+  cards.forEach(card => {
+    card.setAttribute('draggable', 'true');
+
+    card.addEventListener('dragstart', function(e) {
+      this.classList.add('dragging');
+      e.dataTransfer.setData('text/plain', this.dataset.id);
+    });
+
+    card.addEventListener('dragend', function() {
+      this.classList.remove('dragging');
+      document.querySelectorAll('.post-card.drag-over').forEach(c => c.classList.remove('drag-over'));
+    });
+
+    card.addEventListener('dragover', function(e) {
+      e.preventDefault();
+      const dragging = grid.querySelector('.dragging');
+      if (dragging && dragging !== this && this.dataset.status === 'pending') {
+        this.classList.add('drag-over');
+      }
+    });
+
+    card.addEventListener('dragleave', function() {
+      this.classList.remove('drag-over');
+    });
+
+    card.addEventListener('drop', function(e) {
+      e.preventDefault();
+      this.classList.remove('drag-over');
+      const dragging = grid.querySelector('.dragging');
+      if (!dragging || dragging === this) return;
+
+      // Reorder in DOM
+      const allCards = [...grid.querySelectorAll('.post-card[data-status="pending"]')];
+      const fromIdx = allCards.indexOf(dragging);
+      const toIdx = allCards.indexOf(this);
+
+      if (fromIdx < toIdx) {
+        this.after(dragging);
+      } else {
+        this.before(dragging);
+      }
+
+      // Save new order
+      savePostOrder();
+    });
+  });
+}
+
+function savePostOrder() {
+  const grid = document.getElementById('postsGrid');
+  if (!grid) return;
+
+  const pendingCards = grid.querySelectorAll('.post-card[data-status="pending"]');
+  const postIds = [...pendingCards].map(c => parseInt(c.dataset.id));
+
+  if (postIds.length < 2) return;
+
+  apiPost('/api/posts/reorder', { post_ids: postIds }).then(function() {
+    showToast('Posts reordenados!', 'success');
+  }).catch(function() {
+    showToast('Erro ao reordenar.', 'error');
+  });
+}
+
+
+// ──────────────────────────────────────────────
 // Initialization
 // ──────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', () => {
+  loadTheme();
   checkConnection();
   initSSE();
   setInterval(checkConnection, 60000);
@@ -831,4 +933,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (document.getElementById('profileSelect')) {
     loadProfiles();
   }
+
+  // Init drag & drop on posts page
+  initDragDrop();
 });

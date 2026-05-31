@@ -1,7 +1,7 @@
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
@@ -139,8 +139,20 @@ class PostScheduler:
             error_msg = str(exc)
             logger.error("Erro ao publicar post %d: %s", post_id, error_msg)
             self.db.add_log(post_id, "erro", error_msg)
-            self.db.update_post_status(post_id, "failed", error=error_msg)
-            self._emit("post_failed", {"post_id": post_id, "error": error_msg})
+
+            # Retry automático (máx 3 tentativas)
+            retry_count = self.db.increment_retry(post_id)
+            if retry_count < 3:
+                retry_time = self._now() + timedelta(minutes=30)
+                retry_str = retry_time.strftime("%Y-%m-%dT%H:%M:%S")
+                self.db.update_post_status(post_id, "pending")
+                self.schedule_post(post_id, retry_str)
+                self.db.add_log(post_id, "retry", f"Tentativa {retry_count}/3 — reagendado para {retry_str}")
+                self._emit("post_retrying", {"post_id": post_id, "retry_count": retry_count, "next_try": retry_str})
+                logger.info("Post %d reagendado (retry %d/3) para %s", post_id, retry_count, retry_str)
+            else:
+                self.db.update_post_status(post_id, "failed", error=error_msg)
+                self._emit("post_failed", {"post_id": post_id, "error": error_msg})
 
     async def _async_publish(self, post: dict) -> dict:
         from core.ig_auth import IGAuth, IGAuthError

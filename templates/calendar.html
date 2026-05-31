@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+
+{% block page_title %}Calendário{% endblock %}
+{% block page_subtitle %}<p class="header-subtitle">Visualize seus posts no calendário</p>{% endblock %}
+
+{% block content %}
+<div class="calendar-container">
+  <!-- Header -->
+  <div class="calendar-header">
+    <button class="btn btn-secondary btn-sm" onclick="changeMonth(-1)">◀</button>
+    <h3 id="calendarTitle" style="margin:0;"></h3>
+    <button class="btn btn-secondary btn-sm" onclick="changeMonth(1)">▶</button>
+  </div>
+
+  <!-- Weekday headers -->
+  <div class="calendar-grid calendar-weekdays">
+    <div>Seg</div><div>Ter</div><div>Qua</div><div>Qui</div><div>Sex</div><div>Sáb</div><div>Dom</div>
+  </div>
+
+  <!-- Days grid -->
+  <div class="calendar-grid" id="calendarGrid"></div>
+</div>
+
+<!-- Day detail modal -->
+<div class="modal-overlay" id="dayModal" style="display:none;">
+  <div class="modal" style="max-width:500px;width:95%;">
+    <div class="modal-header">
+      <h3 class="modal-title" id="dayModalTitle">Posts do dia</h3>
+      <button class="modal-close" onclick="closeDayModal()">✕</button>
+    </div>
+    <div class="modal-body" id="dayModalBody"></div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+var currentYear, currentMonth;
+var monthNames = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+
+function init() {
+  var now = new Date();
+  currentYear = now.getFullYear();
+  currentMonth = now.getMonth() + 1;
+  loadCalendar();
+}
+
+function changeMonth(delta) {
+  currentMonth += delta;
+  if (currentMonth > 12) { currentMonth = 1; currentYear++; }
+  if (currentMonth < 1) { currentMonth = 12; currentYear--; }
+  loadCalendar();
+}
+
+function loadCalendar() {
+  document.getElementById('calendarTitle').textContent = monthNames[currentMonth - 1] + ' ' + currentYear;
+
+  var monthStr = currentYear + '-' + String(currentMonth).padStart(2, '0');
+  apiGet('/api/calendar?month=' + monthStr).then(function(data) {
+    renderCalendar(data.year, data.month, data.days);
+  });
+}
+
+function renderCalendar(year, month, days) {
+  var grid = document.getElementById('calendarGrid');
+  grid.innerHTML = '';
+
+  // Primeiro dia do mês (0=dom, 1=seg...)
+  var firstDay = new Date(year, month - 1, 1).getDay();
+  // Ajusta para começar na segunda (0=seg)
+  var startOffset = (firstDay + 6) % 7;
+
+  // Dias no mês
+  var daysInMonth = new Date(year, month, 0).getDate();
+
+  // Hoje
+  var today = new Date();
+  var isCurrentMonth = (today.getFullYear() === year && today.getMonth() + 1 === month);
+
+  // Células vazias antes
+  for (var i = 0; i < startOffset; i++) {
+    var empty = document.createElement('div');
+    empty.className = 'calendar-day empty';
+    grid.appendChild(empty);
+  }
+
+  // Dias do mês
+  for (var d = 1; d <= daysInMonth; d++) {
+    var cell = document.createElement('div');
+    cell.className = 'calendar-day';
+
+    if (isCurrentMonth && d === today.getDate()) {
+      cell.classList.add('today');
+    }
+
+    var dayNum = document.createElement('span');
+    dayNum.className = 'day-number';
+    dayNum.textContent = d;
+    cell.appendChild(dayNum);
+
+    var dayPosts = days[d] || [];
+    if (dayPosts.length > 0) {
+      cell.classList.add('has-posts');
+      var dotsDiv = document.createElement('div');
+      dotsDiv.className = 'day-dots';
+
+      var maxDots = Math.min(dayPosts.length, 4);
+      for (var p = 0; p < maxDots; p++) {
+        var dot = document.createElement('span');
+        dot.className = 'cal-dot cal-dot-' + dayPosts[p].status;
+        dotsDiv.appendChild(dot);
+      }
+      if (dayPosts.length > 4) {
+        var more = document.createElement('span');
+        more.className = 'cal-dot-more';
+        more.textContent = '+' + (dayPosts.length - 4);
+        dotsDiv.appendChild(more);
+      }
+      cell.appendChild(dotsDiv);
+
+      cell.onclick = (function(day, posts) {
+        return function() { openDayModal(day, posts); };
+      })(d, dayPosts);
+    }
+
+    grid.appendChild(cell);
+  }
+}
+
+function openDayModal(day, posts) {
+  document.getElementById('dayModalTitle').textContent = day + ' de ' + monthNames[currentMonth - 1];
+  var body = document.getElementById('dayModalBody');
+  var html = '';
+  posts.forEach(function(p) {
+    var statusBadge = p.status === 'published' ? '<span class="badge badge-published">✅</span>' :
+                      p.status === 'pending' ? '<span class="badge badge-pending">⏳</span>' :
+                      '<span class="badge badge-failed">❌</span>';
+    html += '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border-color,#333);">';
+    html += '<div style="font-size:1.2rem;">' + (p.post_type === 'reel' ? '🎬' : p.post_type === 'carousel' ? '🖼️' : p.post_type === 'story' ? '📱' : '📷') + '</div>';
+    html += '<div style="flex:1;"><div style="font-size:0.85rem;font-weight:500;">' + (p.caption || 'Sem legenda') + '</div>';
+    html += '<div style="font-size:0.7rem;color:var(--text-muted);">🕐 ' + p.time + ' • ' + p.profile_name + '</div></div>';
+    html += statusBadge;
+    html += '</div>';
+  });
+  body.innerHTML = html || '<p style="color:var(--text-muted);">Nenhum post neste dia.</p>';
+  document.getElementById('dayModal').style.display = 'flex';
+}
+
+function closeDayModal() {
+  document.getElementById('dayModal').style.display = 'none';
+}
+
+document.getElementById('dayModal').addEventListener('click', function(e) {
+  if (e.target === this) closeDayModal();
+});
+
+init();
+</script>
+{% endblock %}
